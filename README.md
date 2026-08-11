@@ -45,7 +45,7 @@ The planned system will:
 
 ### Core Concept
 
----text---
+```text
 Candidate
     ↓
 Profile + Resume + Target Job
