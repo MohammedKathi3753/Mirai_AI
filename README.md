@@ -65,6 +65,3 @@ Retest
 progress measurement
     ↓
 Improved Interview Readiness
-Progress Measurement
-    ↓
-Improved Interview Readiness
