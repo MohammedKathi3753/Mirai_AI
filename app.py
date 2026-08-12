@@ -10,6 +10,8 @@ from database.database import (
     get_interview_answers
 )
 
+from pages.profile import profile_page
+
 
 # ============================================================
 # PAGE CONFIGURATION
@@ -535,12 +537,6 @@ def show_sidebar():
             use_container_width=True
         ):
             go_to("history")
-
-        if st.button(
-            "👤 My Profile",
-            use_container_width=True
-        ):
-            go_to("profile")
 
         st.divider()
 
@@ -2399,109 +2395,6 @@ def history_page():
         use_container_width=True
     ):
         go_to("interview_setup")
-
-
-# ============================================================
-# PROFILE
-# ============================================================
-
-def profile_page():
-
-    user = st.session_state.user
-
-    st.title(
-        "👤 My Profile"
-    )
-
-    st.write(
-        "Manage your candidate information."
-    )
-
-    st.write("")
-
-    with st.container(border=True):
-
-        st.subheader(
-            "Account Information"
-        )
-
-        st.write(
-            f"**Name:** {user['full_name']}"
-        )
-
-        st.write(
-            f"**Email:** {user['email']}"
-        )
-
-    st.write("")
-
-    st.subheader(
-        "🎯 Interview Profile"
-    )
-
-    profile = st.session_state.profile
-
-    target_role = st.text_input(
-        "Target Job Role",
-        value=profile.get(
-            "job_role",
-            ""
-        ),
-        placeholder="AI/ML Engineer"
-    )
-
-    experience = st.selectbox(
-        "Experience Level",
-        [
-            "Student / Fresher",
-            "Entry Level",
-            "1–2 Years",
-            "3–5 Years",
-            "5+ Years"
-        ]
-    )
-
-    skills = st.text_area(
-        "Technical Skills",
-        value=profile.get(
-            "skills",
-            ""
-        ),
-        placeholder=(
-            "Python, Machine Learning, SQL, NLP..."
-        )
-    )
-
-    career_goal = st.text_area(
-        "Career Goal",
-        value=profile.get(
-            "career_goal",
-            ""
-        ),
-        placeholder=(
-            "What role are you preparing for?"
-        )
-    )
-
-    st.write("")
-
-    if st.button(
-        "💾 Save Profile",
-        type="primary",
-        use_container_width=True
-    ):
-
-        st.session_state.profile = {
-            **profile,
-            "job_role": target_role,
-            "experience": experience,
-            "skills": skills,
-            "career_goal": career_goal
-        }
-
-        st.success(
-            "Profile saved successfully."
-        )
 
 
 # ============================================================

@@ -423,7 +423,9 @@ def initialize_database():
 def create_user(
     full_name,
     email,
-    password
+    password,
+    education="",
+    target_job_role=""
 ):
     """
     Create a new user.
@@ -506,8 +508,8 @@ def create_user(
                 email,
                 password_hash,
                 salt,
-                "",
-                "",
+                education.strip(),
+                target_job_role.strip(),
                 "",
                 "",
                 "",
@@ -634,7 +636,9 @@ def authenticate_user(
             "target_job_role": user["target_job_role"],
             "experience_level": user["experience_level"],
             "technical_skills": user["technical_skills"],
-            "career_goal": user["career_goal"]
+            "career_goal": user["career_goal"],
+            "created_at": user["created_at"],
+            "updated_at": user["updated_at"]
         }
 
     finally:
