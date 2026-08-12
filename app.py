@@ -3,7 +3,8 @@ import streamlit as st
 from database.database import (
     initialize_database,
     create_user,
-    authenticate_user
+    authenticate_user,
+    get_interview_history
 )
 
 
@@ -1031,8 +1032,59 @@ def signup_page():
 def dashboard_page():
 
     user = st.session_state.user
-
     first_name = user["full_name"].split()[0]
+
+    # ========================================================
+    # LOAD REAL INTERVIEW DATA
+    # ========================================================
+
+    try:
+        interviews = get_interview_history(user["id"])
+    except Exception:
+        interviews = []
+
+    completed_interviews = [
+        interview
+        for interview in interviews
+        if interview.get("status") == "completed"
+    ]
+
+    # ========================================================
+    # CALCULATE DASHBOARD STATISTICS
+    # ========================================================
+
+    interviews_completed = len(completed_interviews)
+
+    scores = [
+        float(interview["overall_score"])
+        for interview in completed_interviews
+        if interview.get("overall_score") is not None
+    ]
+
+    average_score = (
+        round(sum(scores) / len(scores), 1)
+        if scores else 0
+    )
+
+    questions_practiced = sum(
+        int(interview.get("completed_questions", 0) or 0)
+        for interview in completed_interviews
+    )
+
+    if completed_interviews:
+        latest_interview = completed_interviews[0]
+        latest_readiness = latest_interview.get("readiness_score")
+        latest_readiness = (
+            float(latest_readiness)
+            if latest_readiness is not None
+            else 0
+        )
+    else:
+        latest_readiness = 0
+
+    # ========================================================
+    # DASHBOARD HEADER
+    # ========================================================
 
     st.title(
         f"Welcome back, {first_name} 👋"
@@ -1050,9 +1102,7 @@ def dashboard_page():
     )
 
     with left:
-
         with st.container(border=True):
-
             st.subheader(
                 "🎯 Ready for your next interview?"
             )
@@ -1073,9 +1123,7 @@ def dashboard_page():
                 go_to("interview_setup")
 
     with right:
-
         with st.container(border=True):
-
             st.subheader(
                 "🤖 Mirai Coach"
             )
@@ -1084,11 +1132,21 @@ def dashboard_page():
                 "Your personal AI interview preparation partner."
             )
 
-            st.success(
-                "Ready to practice"
-            )
+            if interviews_completed > 0:
+                st.success(
+                    "Interview progress updated"
+                )
+            else:
+                st.success(
+                    "Ready to practice"
+                )
 
     st.write("")
+
+    # ========================================================
+    # YOUR PROGRESS
+    # ========================================================
+
     st.subheader("📊 Your Progress")
 
     col1, col2, col3 = st.columns(3)
@@ -1096,113 +1154,127 @@ def dashboard_page():
     with col1:
         st.metric(
             "Interviews Completed",
-            "0"
+            interviews_completed
         )
 
     with col2:
         st.metric(
             "Average Score",
-            "0%"
+            f"{average_score}%"
         )
 
     with col3:
         st.metric(
             "Questions Practiced",
-            "0"
+            questions_practiced
         )
 
     st.write("")
 
-    st.subheader(
-        "🎯 Interview Readiness"
-    )
+    # ========================================================
+    # INTERVIEW READINESS
+    # ========================================================
 
-    left, right = st.columns(
-        [0.7, 2]
-    )
+    st.subheader("🎯 Interview Readiness")
+
+    left, right = st.columns([0.7, 2])
 
     with left:
-
         st.metric(
             "Readiness",
-            "0%"
+            f"{latest_readiness:.1f}%" if interviews_completed else "0%"
         )
 
     with right:
-
         with st.container(border=True):
+            if interviews_completed == 0:
+                st.write(
+                    "Complete your first interview to generate "
+                    "your personalized readiness score."
+                )
 
-            st.write(
-                "Complete your first interview to generate "
-                "your personalized readiness score."
-            )
+                st.progress(0)
 
-            st.progress(0)
+                st.caption(
+                    "Mirai will combine technical knowledge, "
+                    "communication, problem solving and "
+                    "answer structure."
+                )
+            else:
+                st.write(
+                    "Your latest interview readiness score "
+                    "is shown above."
+                )
 
-            st.caption(
-                "Mirai will eventually combine technical "
-                "knowledge, communication, problem solving "
-                "and answer structure."
-            )
+                st.progress(
+                    min(max(latest_readiness / 100, 0), 1)
+                )
+
+                st.caption(
+                    "Mirai combines technical knowledge, "
+                    "communication, problem solving and "
+                    "answer structure."
+                )
 
     st.write("")
 
-    st.subheader(
-        "🧠 Development Areas"
-    )
+    # ========================================================
+    # DEVELOPMENT AREAS
+    # ========================================================
+
+    st.subheader("🧠 Development Areas")
 
     col1, col2 = st.columns(2)
 
+    def show_latest_score(label, key):
+        if completed_interviews:
+            value = completed_interviews[0].get(key)
+
+            if value is not None:
+                st.metric(
+                    "Latest Score",
+                    f"{float(value):.1f}%"
+                )
+                return
+
+        st.caption(label)
+
     with col1:
-
         with st.container(border=True):
-
-            st.subheader(
-                "🔵 Technical Knowledge"
-            )
-
-            st.caption(
+            st.subheader("🔵 Technical Knowledge")
+            show_latest_score(
                 "Complete an interview to evaluate your "
-                "technical performance."
+                "technical performance.",
+                "technical_score"
             )
 
         st.write("")
 
         with st.container(border=True):
-
-            st.subheader(
-                "🟣 Communication"
-            )
-
-            st.caption(
+            st.subheader("🟣 Communication")
+            show_latest_score(
                 "Mirai will evaluate clarity, confidence "
-                "and communication."
+                "and communication.",
+                "communication_score"
             )
 
     with col2:
-
         with st.container(border=True):
-
-            st.subheader(
-                "🟢 Problem Solving"
-            )
-
-            st.caption(
+            st.subheader("🟢 Problem Solving")
+            show_latest_score(
                 "Your approach to technical problems "
-                "will be analyzed."
+                "will be analyzed.",
+                "problem_solving_score"
             )
 
         st.write("")
 
         with st.container(border=True):
-
-            st.subheader(
-                "🟡 Answer Structure"
-            )
-
-            st.caption(
+            st.subheader("🟡 Answer Structure")
+            show_latest_score(
                 "Mirai will analyze how effectively "
-                "you structure your answers."
+                "you structure your answers.",
+                "answer_structure_score"
             )
 
 
@@ -1412,6 +1484,10 @@ def interview_setup_page():
 
         else:
 
+            # ====================================================
+            # SAVE INTERVIEW CONFIGURATION
+            # ====================================================
+
             st.session_state.interview_config = {
                 "target_role": target_role.strip(),
                 "interview_type": interview_type,
@@ -1421,11 +1497,49 @@ def interview_setup_page():
                 "focus_area": focus_area
             }
 
+            # ====================================================
+            # PASS SETTINGS TO pages/interview.py
+            # ====================================================
+
+            st.session_state.selected_job_role = (
+                target_role.strip()
+            )
+
+            st.session_state.selected_interview_type = (
+                interview_type
+            )
+
+            st.session_state.selected_difficulty = (
+                difficulty
+            )
+
+            st.session_state.selected_question_count = (
+                number_of_questions
+            )
+
+            st.session_state.selected_interview_mode = (
+                interview_mode
+            )
+
+            st.session_state.selected_focus_area = (
+                focus_area
+            )
+
+            # ====================================================
+            # RESET OLD APP-LEVEL INTERVIEW STATE
+            # ====================================================
+
             st.session_state.current_question = 0
             st.session_state.answers = []
-            st.session_state.interview_started = True
+            st.session_state.interview_started = False
 
-            go_to("interview")
+            # ====================================================
+            # OPEN THE REAL INTERVIEW ENGINE PAGE
+            # ====================================================
+
+            st.switch_page(
+                "pages/interview.py"
+            )
 
     st.write("")
 
@@ -1439,100 +1553,6 @@ def interview_setup_page():
 # ============================================================
 # INTERVIEW SESSION
 # ============================================================
-
-def interview_page():
-
-    config = st.session_state.interview_config
-
-    if not config:
-
-        go_to("interview_setup")
-        return
-
-    question_number = (
-        st.session_state.current_question + 1
-    )
-
-    total_questions = (
-        config["number_of_questions"]
-    )
-
-    st.title(
-        "🎙️ Interview Session"
-    )
-
-    st.caption(
-        f"{config['target_role']} • "
-        f"{config['interview_type']} • "
-        f"{config['difficulty']}"
-    )
-
-    progress_value = (
-        st.session_state.current_question
-        / total_questions
-    )
-
-    st.progress(progress_value)
-
-    st.write(
-        f"Question {question_number} "
-        f"of {total_questions}"
-    )
-
-    st.write("")
-
-    with st.container(border=True):
-
-        st.caption(
-            "INTERVIEW QUESTION"
-        )
-
-        st.subheader(
-            "Tell me about yourself and explain why "
-            "you are interested in this role."
-        )
-
-    st.write("")
-
-    answer = st.text_area(
-        "Your Answer",
-        placeholder=(
-            "Write your answer as if you were speaking "
-            "to the interviewer..."
-        ),
-        height=220
-    )
-
-    st.write("")
-
-    if st.button(
-        "Submit Answer →",
-        type="primary",
-        use_container_width=True
-    ):
-
-        if not answer.strip():
-
-            st.error(
-                "Please enter your answer before continuing."
-            )
-
-        else:
-
-            st.session_state.answers.append(
-                answer.strip()
-            )
-
-            if question_number < total_questions:
-
-                st.session_state.current_question += 1
-
-                st.rerun()
-
-            else:
-
-                go_to("feedback")
-
 
 # ============================================================
 # FEEDBACK
@@ -1882,10 +1902,6 @@ elif st.session_state.page == "dashboard":
 elif st.session_state.page == "interview_setup":
 
     interview_setup_page()
-
-elif st.session_state.page == "interview":
-
-    interview_page()
 
 elif st.session_state.page == "feedback":
 
