@@ -1,5 +1,7 @@
 import streamlit as st
 
+from datetime import datetime
+
 from database.database import (
     initialize_database,
     create_user,
@@ -1652,9 +1654,20 @@ def feedback_page():
 
 def progress_page():
 
-    st.title(
-        "📈 My Progress"
-    )
+    user = st.session_state.user
+
+    try:
+        interviews = get_interview_history(user["id"])
+    except Exception:
+        interviews = []
+
+    completed_interviews = [
+        interview
+        for interview in interviews
+        if interview.get("status") == "completed"
+    ]
+
+    st.title("📈 My Progress")
 
     st.write(
         "Track your development across interview sessions."
@@ -1662,74 +1675,142 @@ def progress_page():
 
     st.write("")
 
+    if not completed_interviews:
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            with st.container(border=True):
+                st.subheader("🧠 Technical Knowledge")
+                st.metric("Current Score", "—")
+
+        with col2:
+            with st.container(border=True):
+                st.subheader("🗣 Communication")
+                st.metric("Current Score", "—")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            with st.container(border=True):
+                st.subheader("🧩 Problem Solving")
+                st.metric("Current Score", "—")
+
+        with col2:
+            with st.container(border=True):
+                st.subheader("📝 Answer Structure")
+                st.metric("Current Score", "—")
+
+        st.write("")
+
+        with st.container(border=True):
+            st.subheader("📊 Performance Trend")
+            st.info(
+                "Complete your first interview to start "
+                "tracking your performance."
+            )
+
+        return
+
+    def average_score(key):
+        values = []
+
+        for interview in completed_interviews:
+            value = interview.get(key)
+            if value is None:
+                continue
+            try:
+                values.append(float(value))
+            except (TypeError, ValueError):
+                continue
+
+        if not values:
+            return None
+
+        return round(sum(values) / len(values), 1)
+
+    technical_average = average_score("technical_score")
+    communication_average = average_score("communication_score")
+    problem_solving_average = average_score("problem_solving_score")
+    answer_structure_average = average_score("answer_structure_score")
+
     col1, col2 = st.columns(2)
 
     with col1:
-
         with st.container(border=True):
-
-            st.subheader(
-                "🧠 Technical Knowledge"
-            )
-
+            st.subheader("🧠 Technical Knowledge")
             st.metric(
                 "Current Score",
-                "—"
+                f"{technical_average:.1f}%"
+                if technical_average is not None else "—"
             )
 
     with col2:
-
         with st.container(border=True):
-
-            st.subheader(
-                "🗣 Communication"
-            )
-
+            st.subheader("🗣 Communication")
             st.metric(
                 "Current Score",
-                "—"
+                f"{communication_average:.1f}%"
+                if communication_average is not None else "—"
             )
 
     col1, col2 = st.columns(2)
 
     with col1:
-
         with st.container(border=True):
-
-            st.subheader(
-                "🧩 Problem Solving"
-            )
-
+            st.subheader("🧩 Problem Solving")
             st.metric(
                 "Current Score",
-                "—"
+                f"{problem_solving_average:.1f}%"
+                if problem_solving_average is not None else "—"
             )
 
     with col2:
-
         with st.container(border=True):
-
-            st.subheader(
-                "📝 Answer Structure"
-            )
-
+            st.subheader("📝 Answer Structure")
             st.metric(
                 "Current Score",
-                "—"
+                f"{answer_structure_average:.1f}%"
+                if answer_structure_average is not None else "—"
             )
 
     st.write("")
 
     with st.container(border=True):
+        st.subheader("📊 Performance Trend")
 
-        st.subheader(
-            "📊 Performance Trend"
-        )
+        overall_scores = []
 
-        st.info(
-            "Complete multiple interviews to generate "
-            "your performance trend."
-        )
+        for interview in reversed(completed_interviews):
+            value = interview.get("overall_score")
+            if value is None:
+                continue
+            try:
+                overall_scores.append(float(value))
+            except (TypeError, ValueError):
+                continue
+
+        if len(overall_scores) >= 2:
+            st.line_chart(
+                overall_scores,
+                height=260,
+                use_container_width=True
+            )
+            st.caption(
+                "Overall interview score across completed sessions."
+            )
+        elif len(overall_scores) == 1:
+            st.metric(
+                "Latest Overall Score",
+                f"{overall_scores[0]:.1f}%"
+            )
+            st.info(
+                "Complete another interview to see your performance trend."
+            )
+        else:
+            st.info(
+                "Your completed interviews do not have an overall score yet."
+            )
 
 
 # ============================================================
@@ -1738,9 +1819,20 @@ def progress_page():
 
 def history_page():
 
-    st.title(
-        "📜 Interview History"
-    )
+    user = st.session_state.user
+
+    try:
+        interviews = get_interview_history(user["id"])
+    except Exception:
+        interviews = []
+
+    completed_interviews = [
+        interview
+        for interview in interviews
+        if interview.get("status") == "completed"
+    ]
+
+    st.title("📜 Interview History")
 
     st.write(
         "Review your previous interview sessions."
@@ -1748,21 +1840,140 @@ def history_page():
 
     st.write("")
 
-    with st.container(border=True):
+    if not completed_interviews:
 
-        st.subheader(
-            "No interviews completed yet."
+        with st.container(border=True):
+            st.subheader("No interviews completed yet.")
+            st.write(
+                "Once you complete an interview, your results "
+                "and feedback will appear here."
+            )
+
+        st.write("")
+
+        if st.button(
+            "🚀 Start Your First Interview",
+            type="primary",
+            use_container_width=True
+        ):
+            go_to("interview_setup")
+
+        return
+
+    def format_date(value):
+        if not value:
+            return "Date unavailable"
+
+        try:
+            parsed = datetime.fromisoformat(
+                str(value).replace("Z", "+00:00")
+            )
+            return parsed.strftime("%d %b %Y, %I:%M %p")
+        except (TypeError, ValueError):
+            return str(value)
+
+    for interview in completed_interviews:
+
+        role = interview.get(
+            "target_job_role",
+            "Unknown Role"
+        )
+        interview_type = interview.get(
+            "interview_type",
+            "Unknown Type"
+        )
+        difficulty = interview.get(
+            "difficulty",
+            "Unknown"
+        )
+        overall_score = interview.get("overall_score")
+        readiness_score = interview.get("readiness_score")
+        completed_questions = interview.get(
+            "completed_questions",
+            0
+        )
+        total_questions = interview.get(
+            "total_questions",
+            0
+        )
+        completed_at = interview.get("completed_at") or interview.get(
+            "created_at"
         )
 
-        st.write(
-            "Once you complete an interview, your results "
-            "and feedback will appear here."
-        )
+        with st.container(border=True):
 
-    st.write("")
+            st.subheader(f"🎯 {role}")
+
+            st.caption(
+                f"{format_date(completed_at)}"
+            )
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric(
+                    "Overall Score",
+                    f"{float(overall_score):.1f}%"
+                    if overall_score is not None else "—"
+                )
+
+            with col2:
+                st.metric(
+                    "Readiness",
+                    f"{float(readiness_score):.1f}%"
+                    if readiness_score is not None else "—"
+                )
+
+            with col3:
+                st.metric(
+                    "Questions",
+                    f"{completed_questions}/{total_questions}"
+                    if total_questions else str(completed_questions)
+                )
+
+            st.write("")
+            st.write(f"**Interview Type:** {interview_type}")
+            st.write(f"**Difficulty:** {difficulty}")
+            st.write("")
+
+            score_col1, score_col2, score_col3, score_col4 = st.columns(4)
+
+            with score_col1:
+                value = interview.get("technical_score")
+                st.caption("Technical")
+                st.write(
+                    f"{float(value):.1f}%"
+                    if value is not None else "—"
+                )
+
+            with score_col2:
+                value = interview.get("communication_score")
+                st.caption("Communication")
+                st.write(
+                    f"{float(value):.1f}%"
+                    if value is not None else "—"
+                )
+
+            with score_col3:
+                value = interview.get("problem_solving_score")
+                st.caption("Problem Solving")
+                st.write(
+                    f"{float(value):.1f}%"
+                    if value is not None else "—"
+                )
+
+            with score_col4:
+                value = interview.get("answer_structure_score")
+                st.caption("Structure")
+                st.write(
+                    f"{float(value):.1f}%"
+                    if value is not None else "—"
+                )
+
+        st.write("")
 
     if st.button(
-        "🚀 Start Your First Interview",
+        "🚀 Start New Interview",
         type="primary",
         use_container_width=True
     ):
