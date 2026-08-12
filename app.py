@@ -6,7 +6,8 @@ from database.database import (
     initialize_database,
     create_user,
     authenticate_user,
-    get_interview_history
+    get_interview_history,
+    get_interview_answers
 )
 
 
@@ -522,6 +523,12 @@ def show_sidebar():
             use_container_width=True
         ):
             go_to("progress")
+
+        if st.button(
+            "📊 Interview Feedback",
+            use_container_width=True
+        ):
+            go_to("feedback")
 
         if st.button(
             "📜 Interview History",
@@ -1562,42 +1569,237 @@ def interview_setup_page():
 
 def feedback_page():
 
-    st.title(
-        "📊 Interview Feedback"
-    )
+    user = st.session_state.user
+
+    # ========================================================
+    # LOAD COMPLETED INTERVIEWS
+    # ========================================================
+
+    try:
+        interviews = get_interview_history(user["id"])
+    except Exception as error:
+        st.error(
+            f"Could not load interview history: {error}"
+        )
+        return
+
+    completed_interviews = [
+        interview
+        for interview in interviews
+        if interview.get("status") == "completed"
+    ]
+
+    st.title("📊 Interview Feedback")
 
     st.write(
         "Your personalized performance analysis."
     )
 
-    st.info(
-        "The AI evaluation engine will be connected next. "
-        "This section will eventually evaluate your answers, "
-        "identify weaknesses and generate personalized "
-        "recommendations."
+    # ========================================================
+    # NO COMPLETED INTERVIEW
+    # ========================================================
+
+    if not completed_interviews:
+
+        st.info(
+            "Complete an interview first to see "
+            "your personalized feedback."
+        )
+
+        st.write("")
+
+        if st.button(
+            "🚀 Start Your First Interview",
+            type="primary",
+            use_container_width=True
+        ):
+            go_to("interview_setup")
+
+        return
+
+    # ========================================================
+    # LATEST INTERVIEW
+    # ========================================================
+
+    latest_interview = completed_interviews[0]
+    interview_id = latest_interview.get("id")
+
+    # ========================================================
+    # LOAD AI EVALUATIONS
+    # ========================================================
+
+    try:
+        evaluations = get_interview_answers(interview_id)
+    except Exception as error:
+        st.error(
+            f"Could not load interview feedback: {error}"
+        )
+        return
+
+    # ========================================================
+    # INTERVIEW DETAILS
+    # ========================================================
+
+    role = latest_interview.get(
+        "target_job_role",
+        "Interview"
     )
+
+    interview_type = latest_interview.get(
+        "interview_type",
+        "General"
+    )
+
+    difficulty = latest_interview.get(
+        "difficulty",
+        "Adaptive"
+    )
+
+    st.caption(
+        f"{role} • {interview_type} • {difficulty}"
+    )
+
+    st.write("")
+
+    # ========================================================
+    # MAIN SCORES
+    # ========================================================
+
+    overall_score = latest_interview.get(
+        "overall_score"
+    ) or 0
+
+    technical_score = latest_interview.get(
+        "technical_score"
+    ) or 0
+
+    communication_score = latest_interview.get(
+        "communication_score"
+    ) or 0
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
         st.metric(
             "Overall Score",
-            "—"
+            f"{float(overall_score):.1f}%"
         )
 
     with col2:
         st.metric(
             "Technical",
-            "—"
+            f"{float(technical_score):.1f}%"
         )
 
     with col3:
         st.metric(
             "Communication",
-            "—"
+            f"{float(communication_score):.1f}%"
         )
 
     st.write("")
+
+    # ========================================================
+    # PERFORMANCE BREAKDOWN
+    # ========================================================
+
+    st.subheader("📊 Performance Breakdown")
+
+    problem_solving_score = latest_interview.get(
+        "problem_solving_score"
+    ) or 0
+
+    answer_structure_score = latest_interview.get(
+        "answer_structure_score"
+    ) or 0
+
+    readiness_score = latest_interview.get(
+        "readiness_score"
+    ) or 0
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            "Technical",
+            f"{float(technical_score):.1f}%"
+        )
+
+    with col2:
+        st.metric(
+            "Communication",
+            f"{float(communication_score):.1f}%"
+        )
+
+    with col3:
+        st.metric(
+            "Problem Solving",
+            f"{float(problem_solving_score):.1f}%"
+        )
+
+    with col4:
+        st.metric(
+            "Answer Structure",
+            f"{float(answer_structure_score):.1f}%"
+        )
+
+    st.write("")
+
+    # ========================================================
+    # READINESS
+    # ========================================================
+
+    st.subheader("🎯 Interview Readiness")
+
+    st.metric(
+        "Readiness Score",
+        f"{float(readiness_score):.1f}%"
+    )
+
+    st.progress(
+        min(
+            max(float(readiness_score) / 100, 0),
+            1
+        )
+    )
+
+    st.write("")
+
+    # ========================================================
+    # COLLECT AI FEEDBACK
+    # ========================================================
+
+    strengths = []
+    weaknesses = []
+    recommendations = []
+    feedback_items = []
+
+    for evaluation in evaluations:
+
+        strength = evaluation.get("strengths")
+        weakness = evaluation.get("weaknesses")
+        recommendation = evaluation.get(
+            "recommended_action"
+        )
+        feedback = evaluation.get("feedback")
+
+        if strength:
+            strengths.append(strength)
+
+        if weakness:
+            weaknesses.append(weakness)
+
+        if recommendation:
+            recommendations.append(
+                recommendation
+            )
+
+        if feedback:
+            feedback_items.append(feedback)
+
+    # ========================================================
+    # STRENGTHS + IMPROVEMENT AREAS
+    # ========================================================
 
     col1, col2 = st.columns(2)
 
@@ -1605,40 +1807,259 @@ def feedback_page():
 
         with st.container(border=True):
 
-            st.subheader(
-                "💪 Strengths"
-            )
+            st.subheader("💪 Strengths")
 
-            st.write(
-                "AI-generated strengths will appear here."
-            )
+            if strengths:
+
+                for strength in strengths:
+                    st.success(strength)
+
+            else:
+                st.write(
+                    "No strengths recorded."
+                )
 
     with col2:
 
         with st.container(border=True):
 
-            st.subheader(
-                "🎯 Areas to Improve"
-            )
+            st.subheader("🎯 Areas to Improve")
 
-            st.write(
-                "AI-generated weaknesses will appear here."
-            )
+            if weaknesses:
+
+                for weakness in weaknesses:
+                    st.warning(weakness)
+
+            else:
+                st.write(
+                    "No improvement areas recorded."
+                )
 
     st.write("")
+
+    # ========================================================
+    # RECOMMENDED PRACTICE
+    # ========================================================
 
     with st.container(border=True):
 
-        st.subheader(
-            "🧠 Recommended Practice"
-        )
+        st.subheader("🧠 Recommended Practice")
 
-        st.write(
-            "Mirai will recommend targeted practice "
-            "based on your performance."
-        )
+        if recommendations:
+
+            unique_recommendations = list(
+                dict.fromkeys(recommendations)
+            )
+
+            for recommendation in unique_recommendations:
+                st.write(
+                    f"🚀 {recommendation}"
+                )
+
+        else:
+            st.write(
+                "No specific practice recommendation "
+                "was recorded."
+            )
 
     st.write("")
+
+    # ========================================================
+    # AI FEEDBACK
+    # ========================================================
+
+    with st.container(border=True):
+
+        st.subheader("🤖 Mirai's AI Feedback")
+
+        if feedback_items:
+
+            for index, feedback in enumerate(
+                feedback_items,
+                start=1
+            ):
+
+                st.markdown(
+                    f"**Question {index}:**"
+                )
+
+                st.info(feedback)
+
+        else:
+
+            st.write(
+                "No AI feedback was recorded."
+            )
+
+    st.write("")
+
+    # ========================================================
+    # QUESTION-BY-QUESTION FEEDBACK
+    # ========================================================
+
+    st.subheader(
+        "📝 Question-by-Question Feedback"
+    )
+
+    if not evaluations:
+
+        st.info(
+            "No question evaluations were found "
+            "for this interview."
+        )
+
+    else:
+
+        for index, evaluation in enumerate(
+            evaluations,
+            start=1
+        ):
+
+            question_text = evaluation.get(
+                "question_text",
+                f"Question {index}"
+            )
+
+            score = evaluation.get(
+                "overall_score"
+            ) or 0
+
+            with st.expander(
+                f"Question {index} • "
+                f"{float(score):.1f}%"
+            ):
+
+                st.markdown(
+                    f"**Question:** {question_text}"
+                )
+
+                st.write("")
+
+                answer = evaluation.get(
+                    "user_answer"
+                )
+
+                if answer:
+
+                    st.markdown(
+                        "#### 💬 Your Answer"
+                    )
+
+                    st.write(answer)
+
+                    st.write("")
+
+                st.markdown(
+                    "#### 📊 Score Breakdown"
+                )
+
+                evaluation_technical = (
+                    evaluation.get(
+                        "technical_score"
+                    ) or 0
+                )
+
+                evaluation_communication = (
+                    evaluation.get(
+                        "communication_score"
+                    ) or 0
+                )
+
+                evaluation_problem_solving = (
+                    evaluation.get(
+                        "problem_solving_score"
+                    ) or 0
+                )
+
+                evaluation_structure = (
+                    evaluation.get(
+                        "answer_structure_score"
+                    ) or 0
+                )
+
+                score_col1, score_col2 = st.columns(2)
+
+                with score_col1:
+
+                    st.metric(
+                        "Technical",
+                        f"{float(evaluation_technical):.1f}%"
+                    )
+
+                    st.metric(
+                        "Problem Solving",
+                        f"{float(evaluation_problem_solving):.1f}%"
+                    )
+
+                with score_col2:
+
+                    st.metric(
+                        "Communication",
+                        f"{float(evaluation_communication):.1f}%"
+                    )
+
+                    st.metric(
+                        "Answer Structure",
+                        f"{float(evaluation_structure):.1f}%"
+                    )
+
+                st.write("")
+
+                strength = evaluation.get(
+                    "strengths"
+                )
+
+                if strength:
+
+                    st.markdown(
+                        "#### 💪 Strength"
+                    )
+
+                    st.success(strength)
+
+                weakness = evaluation.get(
+                    "weaknesses"
+                )
+
+                if weakness:
+
+                    st.markdown(
+                        "#### 🎯 Areas to Improve"
+                    )
+
+                    st.warning(weakness)
+
+                feedback = evaluation.get(
+                    "feedback"
+                )
+
+                if feedback:
+
+                    st.markdown(
+                        "#### 💬 Mirai's Feedback"
+                    )
+
+                    st.info(feedback)
+
+                recommendation = evaluation.get(
+                    "recommended_action"
+                )
+
+                if recommendation:
+
+                    st.markdown(
+                        "#### 🚀 Recommended Next Step"
+                    )
+
+                    st.write(
+                        recommendation
+                    )
+
+    st.write("")
+
+    # ========================================================
+    # RETURN TO DASHBOARD
+    # ========================================================
 
     if st.button(
         "🏠 Return to Dashboard",
