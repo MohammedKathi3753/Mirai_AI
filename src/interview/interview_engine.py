@@ -1479,6 +1479,90 @@ def _fallback_question(
 # OPTIONAL OPENAI QUESTION GENERATOR
 # ============================================================
 
+def _get_stored_resume_pdf() -> Optional[Dict[str, Any]]:
+    """Retrieve the original resume PDF from the existing database."""
+    try:
+        import streamlit as st
+        from database.database import get_user_resume
+
+        user = st.session_state.get("user", {})
+        if not isinstance(user, dict):
+            return None
+
+        user_id = user.get("id")
+        if user_id is None:
+            return None
+
+        resume = get_user_resume(user_id)
+        if not isinstance(resume, dict):
+            return None
+
+        pdf_data = resume.get("pdf_data")
+        if not isinstance(pdf_data, (bytes, bytearray)) or not pdf_data:
+            return None
+
+        return {
+            "filename": _clean_text(
+                resume.get("filename")
+            ) or "Resume.pdf",
+            "pdf_data": bytes(pdf_data),
+        }
+
+    except Exception:
+        return None
+
+
+def _build_resume_ai_context() -> Optional[Dict[str, str]]:
+    """
+    Temporarily extract text from the original stored PDF.
+
+    The PDF itself remains the source of truth in the database.
+    Extracted text is used only for the current AI request and is
+    never saved back to the database.
+    """
+    resume = _get_stored_resume_pdf()
+
+    if not resume:
+        return None
+
+    try:
+        from io import BytesIO
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(resume["pdf_data"]))
+        pages = []
+
+        for page in reader.pages:
+            try:
+                page_text = page.extract_text() or ""
+            except Exception:
+                page_text = ""
+
+            if page_text.strip():
+                pages.append(page_text.strip())
+
+        extracted_text = "\n\n".join(pages).strip()
+
+        if not extracted_text:
+            return {
+                "filename": resume["filename"],
+                "text": "",
+                "available": "false",
+            }
+
+        # Prevent an unusually large resume from consuming the whole prompt.
+        extracted_text = extracted_text[:18000]
+
+        return {
+            "filename": resume["filename"],
+            "text": extracted_text,
+            "available": "true",
+        }
+
+    except Exception:
+        return None
+
+
 def _get_candidate_profile(
     profile_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
@@ -1597,6 +1681,7 @@ def _generate_ai_question(
     previous_questions: Optional[List[Any]],
     profile_context: Optional[Dict[str, Any]] = None,
     weakness_context: Any = None,
+    resume_context: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Generate a question using OpenAI when an API key is configured.
@@ -1637,6 +1722,11 @@ def _generate_ai_question(
     profile = _get_candidate_profile(
         profile_context
     )
+
+    # Use the stored original PDF when available.
+    # An explicitly supplied resume_context takes priority.
+    if resume_context is None:
+        resume_context = _build_resume_ai_context()
 
     category = normalize_role(
         role
@@ -1707,6 +1797,20 @@ def _generate_ai_question(
     if not profile_text:
         profile_text = "No additional candidate profile information provided."
 
+    if resume_context and resume_context.get("text"):
+        resume_status = (
+            f"Resume filename: {resume_context.get('filename', 'Resume.pdf')}\n"
+            "Resume content read temporarily from the original stored PDF:\n"
+            f"{resume_context['text']}"
+        )
+    elif resume_context:
+        resume_status = (
+            f"Resume filename: {resume_context.get('filename', 'Resume.pdf')}\n"
+            "A resume is stored, but readable text could not be extracted."
+        )
+    else:
+        resume_status = "No resume PDF is available."
+    
     prompt = f"""
 You are Mirai AI's professional interview question generator.
 
@@ -1717,6 +1821,9 @@ Candidate target role:
 
 Candidate profile:
 {profile_text}
+
+Resume:
+{resume_status}
 
 Role category:
 {category}
@@ -1739,6 +1846,9 @@ Relevant professional domains:
 Previously asked questions:
 {previous_text}
 
+Current interview question number:
+{len(previous) + 1}
+
 STRICT REQUIREMENTS:
 
 Candidate personalization rules:
@@ -1746,6 +1856,17 @@ Candidate personalization rules:
 - Match the question to the candidate's experience level when appropriate.
 - Use the candidate's technical skills as relevant focus areas; do not force every skill into one question.
 - Consider education and career goal when they meaningfully affect the question.
+- When a resume is available, actively identify concrete projects,
+  technologies, experience, certifications, achievements, education,
+  and other candidate-specific details from the resume content.
+- Prefer questions grounded in actual resume evidence.
+- If the resume contains a named project, use the actual project name
+  and/or technology in the question when relevant to the role.
+- For the FIRST interview question, if the resume contains a concrete
+  project or experience, ask specifically about that project or experience
+  instead of a generic fundamentals question.
+- Never invent a project, skill, employer, certification, achievement,
+  or experience that is not supported by the resume or candidate profile.
 - Do not expose or unnecessarily mention the candidate profile in the question.
 - If a candidate weakness is provided, make the new question directly test
   or strengthen that weak topic/skill when relevant to the role.
@@ -1790,6 +1911,10 @@ Return exactly:
             timeout=30.0,
         )
 
+        # The original PDF remains stored in the database.
+        # Its text is supplied temporarily in the prompt for reliable
+        # resume-grounded generation with the existing Groq chat model.
+
         response = client.chat.completions.create(
             model=GROQ_MODEL,
             temperature=0.8,
@@ -1800,7 +1925,10 @@ Return exactly:
                         "You are Mirai AI, a professional "
                         "interview question generator. "
                         "Always follow the requested role "
-                        "and difficulty."
+                        "and difficulty. "
+                        "When a resume PDF is attached, "
+                        "use the document itself as evidence "
+                        "for candidate-specific details."
                     ),
                 },
                 {
@@ -1885,6 +2013,7 @@ def generate_unique_question(
     interview_mode: Any = None,
     profile_context: Optional[Dict[str, Any]] = None,
     weakness_context: Any = None,
+    resume_context: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Main question-generation function.
@@ -1972,6 +2101,7 @@ def generate_unique_question(
         previous_questions=used_questions,
         profile_context=profile_context,
         weakness_context=weakness_context,
+        resume_context=resume_context,
     )
 
     if ai_question is not None:
@@ -2126,6 +2256,7 @@ def select_adaptive_question(
     requested_difficulty=None,
     profile_context=None,
     weakness_context=None,
+    resume_context=None,
 ):
     """
     Backward-compatible public function used by
@@ -2176,6 +2307,7 @@ def select_adaptive_question(
         interview_mode=interview_mode,
         profile_context=profile_context,
         weakness_context=weakness_context,
+        resume_context=resume_context,
     )
 # ============================================================
 # ANSWER EVALUATION

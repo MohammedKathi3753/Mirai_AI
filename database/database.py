@@ -127,6 +127,35 @@ def initialize_database():
     )
 
     # ========================================================
+    # RESUME DOCUMENTS
+    # ========================================================
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS resume_documents (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            user_id INTEGER NOT NULL,
+
+            filename TEXT NOT NULL,
+
+            pdf_data BLOB NOT NULL,
+
+            uploaded_at TEXT NOT NULL,
+
+            updated_at TEXT NOT NULL,
+
+            FOREIGN KEY (
+                user_id
+            )
+            REFERENCES users(id)
+            ON DELETE CASCADE
+        )
+        """
+    )
+
+    # ========================================================
     # INTERVIEWS
     # ========================================================
 
@@ -378,6 +407,14 @@ def initialize_database():
     # ========================================================
     # INDEXES
     # ========================================================
+
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS
+        idx_resumes_user
+        ON resume_documents(user_id)
+        """
+    )
 
     cursor.execute(
         """
@@ -713,6 +750,151 @@ def update_user_profile(
 
     finally:
 
+        connection.close()
+
+
+# ============================================================
+# RESUME DOCUMENT STORAGE
+# ============================================================
+
+def save_user_resume(
+    user_id,
+    filename,
+    pdf_data
+):
+    """
+    Store or replace the user's current resume PDF.
+
+    The original PDF is preserved as a BLOB in the database so it
+    remains the source document for future resume-aware features.
+    """
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        now = datetime.now().isoformat()
+
+        # Keep one active resume per user for the first version.
+        cursor.execute(
+            """
+            DELETE FROM resume_documents
+            WHERE user_id = ?
+            """,
+            (user_id,)
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO resume_documents (
+                user_id,
+                filename,
+                pdf_data,
+                uploaded_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                filename,
+                sqlite3.Binary(pdf_data),
+                now,
+                now
+            )
+        )
+
+        connection.commit()
+
+        return cursor.lastrowid
+
+    except Exception:
+        connection.rollback()
+        return None
+
+    finally:
+        connection.close()
+
+
+def get_user_resume(
+    user_id
+):
+    """
+    Return the user's current stored resume.
+
+    Returns:
+        {
+            "id": ...,
+            "user_id": ...,
+            "filename": ...,
+            "pdf_data": bytes,
+            "uploaded_at": ...,
+            "updated_at": ...
+        }
+
+        or None if no resume exists.
+    """
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                user_id,
+                filename,
+                pdf_data,
+                uploaded_at,
+                updated_at
+            FROM resume_documents
+            WHERE user_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (user_id,)
+        )
+
+        resume = cursor.fetchone()
+
+        if resume is None:
+            return None
+
+        return dict(resume)
+
+    finally:
+        connection.close()
+
+
+def delete_user_resume(
+    user_id
+):
+    """
+    Delete the user's stored resume.
+    """
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            """
+            DELETE FROM resume_documents
+            WHERE user_id = ?
+            """,
+            (user_id,)
+        )
+
+        connection.commit()
+
+        return cursor.rowcount > 0
+
+    except Exception:
+        connection.rollback()
+        return False
+
+    finally:
         connection.close()
 
 
