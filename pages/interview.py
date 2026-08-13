@@ -461,6 +461,7 @@ def generate_unique_question(
     requested_difficulty="Adaptive",
     focus_area=None,
     profile_context=None,
+    weakness_context=None,
 ):
 
     used_keys = {
@@ -497,6 +498,8 @@ def generate_unique_question(
                 if profile_context is not None
                 else candidate_profile
             ),
+
+            weakness_context=weakness_context,
         )
 
 
@@ -1295,6 +1298,21 @@ if (
                 focus_area=focus_area,
 
                 profile_context=candidate_profile,
+
+                # True adaptive behavior:
+                # target the next question at the weakness found
+                # in the previous AI evaluation.
+                weakness_context=(
+                    st.session_state.last_evaluation.get(
+                        "weaknesses",
+                        "",
+                    )
+                    if isinstance(
+                        st.session_state.last_evaluation,
+                        dict,
+                    )
+                    else ""
+                ),
             )
         )
 

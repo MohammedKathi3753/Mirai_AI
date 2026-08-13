@@ -1520,6 +1520,75 @@ def _get_candidate_profile(
     }
 
 
+def _normalize_weakness_context(weakness_context):
+    """
+    Normalize the evaluator's weakness output so it can be safely
+    passed to the AI generator and used by the local fallback.
+    """
+    if weakness_context is None:
+        return ""
+
+    if isinstance(weakness_context, (list, tuple, set)):
+        return "; ".join(
+            _clean_text(item)
+            for item in weakness_context
+            if _clean_text(item)
+        )
+
+    return _clean_text(weakness_context)
+
+
+def _weakness_match_score(question, weakness_context):
+    """
+    Score how strongly a local question targets the candidate's weakness.
+    AI-generated questions receive the weakness directly in their prompt.
+    """
+    weakness = _normalize_weakness_context(weakness_context)
+
+    if not weakness or not isinstance(question, dict):
+        return 0
+
+    weakness_words = set(
+        re.findall(
+            r"[a-zA-Z0-9+#.-]{3,}",
+            weakness.casefold(),
+        )
+    )
+
+    stop_words = {
+        "the", "and", "for", "with", "that", "this", "your",
+        "answer", "should", "need", "needs", "more", "better",
+        "improve", "improvement", "candidate", "question",
+        "knowledge", "understanding", "good", "weak", "weakness",
+    }
+    weakness_words -= stop_words
+
+    if not weakness_words:
+        return 0
+
+    searchable_parts = [
+        str(question.get("topic", "")),
+        str(question.get("skill", "")),
+    ]
+
+    keywords = question.get("keywords", [])
+    if isinstance(keywords, list):
+        searchable_parts.extend(
+            str(item)
+            for item in keywords
+        )
+
+    searchable = " ".join(
+        searchable_parts
+    ).casefold()
+
+    return sum(
+        1
+        for word in weakness_words
+        if word in searchable
+    )
+
+
 def _generate_ai_question(
     target_role: Any,
     interview_type: Any,
@@ -1527,6 +1596,7 @@ def _generate_ai_question(
     focus_area: Any,
     previous_questions: Optional[List[Any]],
     profile_context: Optional[Dict[str, Any]] = None,
+    weakness_context: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Generate a question using OpenAI when an API key is configured.
@@ -1559,6 +1629,10 @@ def _generate_ai_question(
     focus = _clean_text(
         focus_area
     ) or "General"
+
+    weakness = _normalize_weakness_context(
+        weakness_context
+    )
 
     profile = _get_candidate_profile(
         profile_context
@@ -1656,6 +1730,9 @@ Difficulty:
 Focus area:
 {focus}
 
+Candidate weakness from the previous answer:
+{weakness if weakness else "None identified"}
+
 Relevant professional domains:
 {", ".join(domains)}
 
@@ -1670,6 +1747,9 @@ Candidate personalization rules:
 - Use the candidate's technical skills as relevant focus areas; do not force every skill into one question.
 - Consider education and career goal when they meaningfully affect the question.
 - Do not expose or unnecessarily mention the candidate profile in the question.
+- If a candidate weakness is provided, make the new question directly test
+  or strengthen that weak topic/skill when relevant to the role.
+- Do not mention the weakness itself in the interview question.
 
 1. The question MUST be relevant to the target role.
 2. Do NOT default to IT, programming, Python, or AI/ML unless the target role requires it.
@@ -1804,6 +1884,7 @@ def generate_unique_question(
     focus_area: Any = None,
     interview_mode: Any = None,
     profile_context: Optional[Dict[str, Any]] = None,
+    weakness_context: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Main question-generation function.
@@ -1890,6 +1971,7 @@ def generate_unique_question(
         focus_area=focus_area,
         previous_questions=used_questions,
         profile_context=profile_context,
+        weakness_context=weakness_context,
     )
 
     if ai_question is not None:
@@ -1909,6 +1991,61 @@ def generate_unique_question(
         difficulty=actual_difficulty,
         used_questions=used_questions,
     )
+
+    if weakness_context:
+        category = normalize_role(target_role)
+
+        bank = ROLE_QUESTION_BANK.get(
+            category,
+            ROLE_QUESTION_BANK["General"],
+        )
+
+        weakness_candidates = []
+
+        for level in [actual_difficulty] + [
+            item
+            for item in DIFFICULTY_ORDER
+            if item != actual_difficulty
+        ]:
+            for question in bank.get(level, []):
+                if question_key(question) in used_keys:
+                    continue
+
+                match_score = _weakness_match_score(
+                    question,
+                    weakness_context,
+                )
+
+                if match_score > 0:
+                    item = normalize_question(
+                        {
+                            **question,
+                            "difficulty": level,
+                            "role_category": category,
+                            "interview_type": interview_type,
+                        }
+                    )
+
+                    if item:
+                        weakness_candidates.append(
+                            (match_score, item)
+                        )
+
+        if weakness_candidates:
+            best_score = max(
+                score
+                for score, _ in weakness_candidates
+            )
+
+            best_questions = [
+                item
+                for score, item in weakness_candidates
+                if score == best_score
+            ]
+
+            return random.choice(
+                best_questions
+            )
 
     if fallback is not None:
 
@@ -1988,6 +2125,7 @@ def select_adaptive_question(
     interview_mode=None,
     requested_difficulty=None,
     profile_context=None,
+    weakness_context=None,
 ):
     """
     Backward-compatible public function used by
@@ -2037,6 +2175,7 @@ def select_adaptive_question(
         focus_area=focus_area,
         interview_mode=interview_mode,
         profile_context=profile_context,
+        weakness_context=weakness_context,
     )
 # ============================================================
 # ANSWER EVALUATION
