@@ -11,6 +11,7 @@ from database.database import (
 )
 
 from pages.profile import profile_page
+from pages.progress import progress_page
 
 
 # ============================================================
@@ -529,22 +530,10 @@ def show_sidebar():
             go_to("interview_setup")
 
         if st.button(
-            "📈 My Progress",
-            use_container_width=True
-        ):
-            go_to("progress")
-
-        if st.button(
             "📊 Interview Feedback",
             use_container_width=True
         ):
             go_to("feedback")
-
-        if st.button(
-            "📜 Interview History",
-            use_container_width=True
-        ):
-            go_to("history")
 
         st.divider()
 

@@ -1918,8 +1918,15 @@ elif (
 
             st.session_state.interview_finished = True
 
-
-            st.rerun()
+            # ----------------------------------------------------
+            # DIRECT REDIRECT TO INTERVIEW FEEDBACK
+            # ----------------------------------------------------
+            # The completed interview is already saved in the
+            # database above. Send the user directly to the main
+            # app's Feedback page instead of showing the old
+            # in-page Results screen.
+            st.session_state.page = "feedback"
+            st.switch_page("app.py")
 
 
         # ----------------------------------------------------
