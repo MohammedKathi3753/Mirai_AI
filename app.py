@@ -39,6 +39,14 @@ initialize_database()
 if "page" not in st.session_state:
     st.session_state.page = "welcome"
 
+# Open the public Home page first when the main app is launched.
+# The Home page sets this flag before sending the user back to app.py.
+if "main_app_active" not in st.session_state:
+    st.session_state.main_app_active = False
+
+if not st.session_state.main_app_active:
+    st.switch_page("pages/home.py")
+
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -531,6 +539,12 @@ def show_sidebar():
             use_container_width=True
         ):
             go_to("feedback")
+
+        if st.button(
+            "📜 Interview History",
+            use_container_width=True
+        ):
+            go_to("history")
 
         st.divider()
 
