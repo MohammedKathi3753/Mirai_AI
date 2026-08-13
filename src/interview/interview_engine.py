@@ -1479,12 +1479,54 @@ def _fallback_question(
 # OPTIONAL OPENAI QUESTION GENERATOR
 # ============================================================
 
+def _get_candidate_profile(
+    profile_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    """
+    Get candidate profile information for AI question generation.
+
+    If profile_context is not passed explicitly, the active Streamlit
+    session profile is used automatically. This keeps existing callers
+    backward-compatible.
+    """
+
+    profile = profile_context if isinstance(profile_context, dict) else {}
+
+    if not profile:
+        try:
+            import streamlit as st
+
+            user = st.session_state.get("user", {})
+            if isinstance(user, dict):
+                profile = user
+        except Exception:
+            profile = {}
+
+    return {
+        "education": _clean_text(profile.get("education", "")),
+        "experience": _clean_text(
+            profile.get(
+                "experience",
+                profile.get("experience_level", ""),
+            )
+        ),
+        "skills": _clean_text(
+            profile.get(
+                "skills",
+                profile.get("technical_skills", ""),
+            )
+        ),
+        "career_goal": _clean_text(profile.get("career_goal", "")),
+    }
+
+
 def _generate_ai_question(
     target_role: Any,
     interview_type: Any,
     difficulty: str,
     focus_area: Any,
     previous_questions: Optional[List[Any]],
+    profile_context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Generate a question using OpenAI when an API key is configured.
@@ -1517,6 +1559,10 @@ def _generate_ai_question(
     focus = _clean_text(
         focus_area
     ) or "General"
+
+    profile = _get_candidate_profile(
+        profile_context
+    )
 
     category = normalize_role(
         role
@@ -1560,6 +1606,33 @@ def _generate_ai_question(
     if not previous_text:
         previous_text = "None"
 
+    profile_lines = []
+
+    if profile["education"]:
+        profile_lines.append(
+            f"- Education: {profile['education']}"
+        )
+
+    if profile["experience"]:
+        profile_lines.append(
+            f"- Experience level: {profile['experience']}"
+        )
+
+    if profile["skills"]:
+        profile_lines.append(
+            f"- Technical skills: {profile['skills']}"
+        )
+
+    if profile["career_goal"]:
+        profile_lines.append(
+            f"- Career goal: {profile['career_goal']}"
+        )
+
+    profile_text = "\n".join(profile_lines)
+
+    if not profile_text:
+        profile_text = "No additional candidate profile information provided."
+
     prompt = f"""
 You are Mirai AI's professional interview question generator.
 
@@ -1567,6 +1640,9 @@ Generate exactly ONE interview question.
 
 Candidate target role:
 {role}
+
+Candidate profile:
+{profile_text}
 
 Role category:
 {category}
@@ -1587,6 +1663,13 @@ Previously asked questions:
 {previous_text}
 
 STRICT REQUIREMENTS:
+
+Candidate personalization rules:
+- Use the candidate profile to personalize the question when useful.
+- Match the question to the candidate's experience level when appropriate.
+- Use the candidate's technical skills as relevant focus areas; do not force every skill into one question.
+- Consider education and career goal when they meaningfully affect the question.
+- Do not expose or unnecessarily mention the candidate profile in the question.
 
 1. The question MUST be relevant to the target role.
 2. Do NOT default to IT, programming, Python, or AI/ML unless the target role requires it.
@@ -1720,6 +1803,7 @@ def generate_unique_question(
     difficulty: Any = "Adaptive",
     focus_area: Any = None,
     interview_mode: Any = None,
+    profile_context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Main question-generation function.
@@ -1805,6 +1889,7 @@ def generate_unique_question(
         difficulty=actual_difficulty,
         focus_area=focus_area,
         previous_questions=used_questions,
+        profile_context=profile_context,
     )
 
     if ai_question is not None:
@@ -1902,6 +1987,7 @@ def select_adaptive_question(
     focus_area=None,
     interview_mode=None,
     requested_difficulty=None,
+    profile_context=None,
 ):
     """
     Backward-compatible public function used by
@@ -1950,6 +2036,7 @@ def select_adaptive_question(
         difficulty=difficulty,
         focus_area=focus_area,
         interview_mode=interview_mode,
+        profile_context=profile_context,
     )
 # ============================================================
 # ANSWER EVALUATION

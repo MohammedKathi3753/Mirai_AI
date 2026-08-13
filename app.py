@@ -532,12 +532,6 @@ def show_sidebar():
         ):
             go_to("feedback")
 
-        if st.button(
-            "📜 Interview History",
-            use_container_width=True
-        ):
-            go_to("history")
-
         st.divider()
 
         st.caption("SIGNED IN AS")
@@ -1289,14 +1283,90 @@ def dashboard_page():
 
 def interview_setup_page():
 
+    user = st.session_state.get("user") or {}
+    saved_profile = st.session_state.get("profile") or {}
+
+    # ========================================================
+    # LOAD SAVED PROFILE
+    # ========================================================
+
+    target_role = (
+        user.get("target_job_role")
+        or saved_profile.get("job_role")
+        or ""
+    ).strip()
+
+    education = (
+        user.get("education")
+        or saved_profile.get("education")
+        or ""
+    ).strip()
+
+    experience = (
+        user.get("experience_level")
+        or saved_profile.get("experience")
+        or ""
+    ).strip()
+
+    technical_skills = (
+        user.get("technical_skills")
+        or saved_profile.get("skills")
+        or ""
+    ).strip()
+
+    career_goal = (
+        user.get("career_goal")
+        or saved_profile.get("career_goal")
+        or ""
+    ).strip()
+
     st.title(
         "🎯 Interview Setup"
     )
 
     st.write(
-        "Build an interview that matches your goals, "
-        "role and current preparation level."
+        "Your saved profile is used automatically to "
+        "personalize your interview questions."
     )
+
+    st.write("")
+
+    # ========================================================
+    # CANDIDATE PROFILE PREVIEW
+    # ========================================================
+
+    with st.container(border=True):
+
+        st.subheader("👤 Candidate Profile")
+        st.caption(
+            "These details come from My Profile and will be "
+            "provided to Mirai AI when generating questions."
+        )
+
+        profile_col1, profile_col2 = st.columns(2)
+
+        with profile_col1:
+            st.caption("TARGET JOB ROLE")
+            st.write(target_role or "Not provided")
+
+            st.caption("EDUCATION")
+            st.write(education or "Not provided")
+
+            st.caption("EXPERIENCE LEVEL")
+            st.write(experience or "Not provided")
+
+        with profile_col2:
+            st.caption("TECHNICAL SKILLS")
+            st.write(technical_skills or "Not provided")
+
+            st.caption("CAREER GOAL")
+            st.write(career_goal or "Not provided")
+
+        if not target_role:
+            st.warning(
+                "⚠️ Please add your Target Job Role in My Profile "
+                "before starting an interview."
+            )
 
     st.write("")
 
@@ -1310,17 +1380,12 @@ def interview_setup_page():
         with st.container(border=True):
 
             st.subheader(
-                "💼 Role & Interview"
+                "💼 Interview Configuration"
             )
 
             st.caption(
-                "Tell Mirai what kind of interview "
-                "you want to practice."
-            )
-
-            target_role = st.text_input(
-                "Target Job Role",
-                placeholder="Example: AI/ML Engineer"
+                "Choose the settings for this interview. "
+                "Your candidate profile is already loaded above."
             )
 
             interview_type = st.selectbox(
@@ -1375,9 +1440,9 @@ def interview_setup_page():
             if difficulty == "Adaptive":
 
                 st.info(
-                    "🤖 Adaptive Mode: Mirai will eventually "
-                    "adjust question difficulty according "
-                    "to your performance."
+                    "🤖 Adaptive Mode: Mirai will adjust "
+                    "question difficulty according to your "
+                    "performance."
                 )
 
             st.subheader(
@@ -1446,14 +1511,8 @@ def interview_setup_page():
                 "✨ Interview Preview"
             )
 
-            preview_role = (
-                target_role.strip()
-                if target_role.strip()
-                else "Not selected"
-            )
-
             st.write(
-                f"**Role:** {preview_role}"
+                f"**Role:** {target_role or 'Not provided'}"
             )
 
             st.write(
@@ -1481,10 +1540,10 @@ def interview_setup_page():
         use_container_width=True
     ):
 
-        if not target_role.strip():
+        if not target_role:
 
             st.error(
-                "Please enter your target job role first."
+                "Please update your Target Job Role in My Profile first."
             )
 
         else:
@@ -1493,22 +1552,37 @@ def interview_setup_page():
             # SAVE INTERVIEW CONFIGURATION
             # ====================================================
 
+            candidate_profile = {
+                "full_name": user.get(
+                    "full_name",
+                    saved_profile.get("full_name", "")
+                ),
+                "email": user.get(
+                    "email",
+                    saved_profile.get("email", "")
+                ),
+                "education": education,
+                "job_role": target_role,
+                "experience": experience,
+                "skills": technical_skills,
+                "career_goal": career_goal
+            }
+
             st.session_state.interview_config = {
-                "target_role": target_role.strip(),
+                "target_role": target_role,
                 "interview_type": interview_type,
                 "difficulty": difficulty,
                 "number_of_questions": number_of_questions,
                 "interview_mode": interview_mode,
-                "focus_area": focus_area
+                "focus_area": focus_area,
+                "candidate_profile": candidate_profile
             }
 
             # ====================================================
             # PASS SETTINGS TO pages/interview.py
             # ====================================================
 
-            st.session_state.selected_job_role = (
-                target_role.strip()
-            )
+            st.session_state.selected_job_role = target_role
 
             st.session_state.selected_interview_type = (
                 interview_type
@@ -1529,6 +1603,8 @@ def interview_setup_page():
             st.session_state.selected_focus_area = (
                 focus_area
             )
+
+            st.session_state.candidate_profile = candidate_profile
 
             # ====================================================
             # RESET OLD APP-LEVEL INTERVIEW STATE

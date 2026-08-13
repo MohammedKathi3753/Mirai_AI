@@ -305,6 +305,34 @@ if "id" not in user:
 
 
 # ============================================================
+# CANDIDATE PROFILE
+# ============================================================
+
+# The profile saved from My Profile is the source of truth
+# for candidate-specific interview information.
+candidate_profile = {
+    "full_name": str(user.get("full_name", "") or "").strip(),
+    "education": str(user.get("education", "") or "").strip(),
+    "target_job_role": str(
+        user.get("target_job_role", "") or ""
+    ).strip(),
+    "experience_level": str(
+        user.get("experience_level", "") or ""
+    ).strip(),
+    "technical_skills": str(
+        user.get("technical_skills", "") or ""
+    ).strip(),
+    "career_goal": str(
+        user.get("career_goal", "") or ""
+    ).strip(),
+}
+
+# Keep a copy in session state so the interview engine and
+# future interview components can use the same profile snapshot.
+st.session_state["interview_profile"] = candidate_profile
+
+
+# ============================================================
 # HELPER: NORMALIZE QUESTION
 # ============================================================
 
@@ -432,6 +460,7 @@ def generate_unique_question(
     target_role=None,
     requested_difficulty="Adaptive",
     focus_area=None,
+    profile_context=None,
 ):
 
     used_keys = {
@@ -462,6 +491,12 @@ def generate_unique_question(
             requested_difficulty=requested_difficulty,
 
             focus_area=focus_area,
+
+            profile_context=(
+                profile_context
+                if profile_context is not None
+                else candidate_profile
+            ),
         )
 
 
@@ -1031,6 +1066,54 @@ if (
 
 
     # --------------------------------------------------------
+    # Candidate profile used for this interview
+    # --------------------------------------------------------
+
+    st.subheader("👤 Candidate Profile")
+
+    profile_col1, profile_col2 = st.columns(2)
+
+    with profile_col1:
+        st.caption("TARGET JOB ROLE")
+        st.write(
+            candidate_profile["target_job_role"]
+            or "Not provided"
+        )
+
+        st.caption("EDUCATION")
+        st.write(
+            candidate_profile["education"]
+            or "Not provided"
+        )
+
+        st.caption("EXPERIENCE")
+        st.write(
+            candidate_profile["experience_level"]
+            or "Not provided"
+        )
+
+    with profile_col2:
+        st.caption("TECHNICAL SKILLS")
+        st.write(
+            candidate_profile["technical_skills"]
+            or "Not provided"
+        )
+
+        st.caption("CAREER GOAL")
+        st.write(
+            candidate_profile["career_goal"]
+            or "Not provided"
+        )
+
+    st.caption(
+        "💡 These details come from My Profile and are used by "
+        "Mirai AI to personalize your interview questions."
+    )
+
+    st.write("")
+
+
+    # --------------------------------------------------------
     # Begin interview
     # --------------------------------------------------------
 
@@ -1077,31 +1160,14 @@ if (
         )
 
 
+        # Target role comes from the saved profile.
+        # The previous selected-job-role value is only a fallback
+        # for older sessions that may not have profile data yet.
         target_role = (
-            st.session_state.get(
-                "selected_job_role"
-            )
+            candidate_profile["target_job_role"]
+            or st.session_state.get("selected_job_role")
+            or "AI/ML Engineer"
         )
-
-
-        if not target_role:
-
-            if isinstance(
-                user,
-                dict
-            ):
-
-                target_role = user.get(
-                    "target_job_role",
-                    "AI/ML Engineer"
-                )
-
-
-        if not target_role:
-
-            target_role = (
-                "AI/ML Engineer"
-            )
 
 
         total_questions = (
@@ -1227,6 +1293,8 @@ if (
                 requested_difficulty=difficulty,
 
                 focus_area=focus_area,
+
+                profile_context=candidate_profile,
             )
         )
 
@@ -1880,6 +1948,8 @@ elif (
                     "selected_focus_area",
                     "Overall Performance"
                 ),
+
+                profile_context=candidate_profile,
             )
         )
 
