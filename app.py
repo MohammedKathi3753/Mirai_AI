@@ -535,6 +535,18 @@ def show_sidebar():
         ):
             go_to("feedback")
 
+        if st.button(
+            "📄 Resume Analysis",
+            use_container_width=True
+        ):
+            st.switch_page("pages/resume_analysis.py")
+
+        if st.button(
+            "🎯 Job Matching",
+            use_container_width=True
+        ):
+            st.switch_page("pages/job_matching.py")
+
         st.divider()
 
         st.caption("SIGNED IN AS")
