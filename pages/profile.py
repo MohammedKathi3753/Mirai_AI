@@ -53,6 +53,13 @@ def save_profile_resume(user_id, uploaded_file):
 
     pdf_data = uploaded_file.getvalue()
 
+    # Hard upload limit to prevent oversized files from consuming
+    # excessive memory/storage during upload and database insertion.
+    MAX_RESUME_SIZE = 10 * 1024 * 1024  # 10 MB
+
+    if len(pdf_data) > MAX_RESUME_SIZE:
+        return False, "Resume file is too large. Maximum size is 10 MB."
+
     if not pdf_data:
         return False, "The uploaded PDF is empty."
 
