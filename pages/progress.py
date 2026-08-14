@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime, date, timedelta
 
 from database.database import (
     get_user_progress,
@@ -92,6 +93,185 @@ def _trend_symbol(change):
         return "↓"
     return "→"
 
+
+def _interview_date(interview):
+    """Return the interview's calendar date, if available."""
+    value = interview.get("completed_at") or interview.get("created_at")
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        ).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _streak_stats(interviews):
+    """Calculate current and best consecutive-day interview streaks."""
+    dates = sorted(
+        {
+            value
+            for value in (_interview_date(item) for item in interviews)
+            if value is not None
+        }
+    )
+
+    if not dates:
+        return 0, 0
+
+    best = 1
+    run = 1
+
+    for previous, current in zip(dates, dates[1:]):
+        if current == previous + timedelta(days=1):
+            run += 1
+            best = max(best, run)
+        else:
+            run = 1
+
+    today = date.today()
+    latest = dates[-1]
+
+    if latest not in (today, today - timedelta(days=1)):
+        current = 0
+    else:
+        current = 1
+        cursor = latest
+
+        for previous in reversed(dates[:-1]):
+            if cursor - previous == timedelta(days=1):
+                current += 1
+                cursor = previous
+            elif previous < cursor - timedelta(days=1):
+                break
+
+    return current, best
+
+
+def _achievement_data(completed):
+    """Build real-time progressive achievements from interview history."""
+    total = len(completed)
+
+    scores = [
+        _safe_float(item.get("overall_score"))
+        for item in completed
+        if _valid_score(item.get("overall_score"))
+    ]
+
+    current_streak, best_streak = _streak_stats(completed)
+
+    chronological = list(reversed(completed))
+    recent = chronological[-3:]
+    previous = chronological[-6:-3] if len(chronological) > 3 else []
+
+    recent_avg = _average_for(recent, "overall_score")
+    previous_avg = (
+        _average_for(previous, "overall_score")
+        if previous else None
+    )
+
+    improvement = (
+        recent_avg - previous_avg
+        if previous_avg is not None
+        else 0.0
+    )
+
+    highest_score = max(scores) if scores else 0.0
+
+    def progressive_cards(icon, levels, value, description_template):
+        cards = []
+
+        for target in levels:
+            earned = value >= target
+
+            cards.append({
+                "icon": icon,
+                "title": (
+                    f"{target}-Day Streak"
+                    if icon == "🔥"
+                    else f"{target} Interviews"
+                    if icon == "🎯"
+                    else f"{target}% Score"
+                    if icon == "🏆"
+                    else f"+{target} Point Improvement"
+                ),
+                "description": description_template.format(target=target),
+                "earned": earned,
+                "target": target,
+                "value": value,
+            })
+
+        return cards
+
+    streak_cards = progressive_cards(
+        "🔥",
+        [1, 3, 5, 7, 10, 14, 21, 30],
+        best_streak,
+        "Build a {target}-day consecutive practice streak.",
+    )
+
+    interview_cards = progressive_cards(
+        "🎯",
+        [1, 3, 5, 10, 20, 50],
+        total,
+        "Complete {target} mock interviews.",
+    )
+
+    score_cards = progressive_cards(
+        "🏆",
+        [70, 80, 90, 95],
+        highest_score,
+        "Score {target}% or higher in an interview.",
+    )
+
+    improvement_cards = progressive_cards(
+        "📈",
+        [2, 5, 10],
+        max(0.0, improvement),
+        "Improve your recent average by {target} points.",
+    )
+
+    next_streak = next(
+        (target for target in [1, 3, 5, 7, 10, 14, 21, 30]
+         if best_streak < target),
+        None,
+    )
+
+    next_interview = next(
+        (target for target in [1, 3, 5, 10, 20, 50]
+         if total < target),
+        None,
+    )
+
+    next_score = next(
+        (target for target in [70, 80, 90, 95]
+         if highest_score < target),
+        None,
+    )
+
+    next_improvement = next(
+        (target for target in [2, 5, 10]
+         if improvement < target),
+        None,
+    )
+
+    return {
+        "current_streak": current_streak,
+        "best_streak": best_streak,
+        "total": total,
+        "next_streak": next_streak,
+        "next_interview": next_interview,
+        "next_score": next_score,
+        "next_improvement": next_improvement,
+        "achievements": {
+            "🔥 Practice Streak": streak_cards,
+            "🎯 Interview Milestones": interview_cards,
+            "🏆 Score Milestones": score_cards,
+            "📈 Improvement": improvement_cards,
+        },
+    }
 
 def _skill_analytics(interviews):
     fields = [
@@ -659,6 +839,203 @@ def progress_page():
             line-height: 1.65;
         }
 
+        .achievement-section-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #30354D;
+            font-size: 15px;
+            font-weight: 800;
+            margin: 28px 0 12px;
+        }
+
+        .achievement-summary {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin: 8px 0 4px;
+        }
+
+        .achievement-summary-card {
+            background: #FFFFFF;
+            border: 1px solid #E4E3ED;
+            border-radius: 16px;
+            padding: 16px 18px;
+        }
+
+        .achievement-summary-label {
+            color: #858A9D;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: .7px;
+            text-transform: uppercase;
+        }
+
+        .achievement-summary-value {
+            color: #393D58;
+            font-size: 25px;
+            font-weight: 850;
+            line-height: 1.15;
+            margin-top: 6px;
+        }
+
+        .achievement-summary-note {
+            color: #8C91A5;
+            font-size: 10.5px;
+            margin-top: 4px;
+        }
+
+        .achievement-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .achievement-card {
+            position: relative;
+            background: #FFFFFF;
+            border: 1px solid #E4E3ED;
+            border-radius: 16px;
+            padding: 16px 17px;
+            min-height: 148px;
+            box-shadow: 0 5px 18px rgba(50, 45, 100, 0.035);
+            overflow: hidden;
+        }
+
+        .achievement-card.earned {
+            border-color: #D9D2FF;
+            background: linear-gradient(145deg, #FBFAFF, #FFFFFF);
+        }
+
+        .achievement-card.locked {
+            background: #F8F8FB;
+        }
+
+        .achievement-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .achievement-icon {
+            width: 38px;
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            background: #F0EDFF;
+            font-size: 21px;
+        }
+
+        .achievement-card.locked .achievement-icon {
+            background: #EEEEF3;
+            filter: grayscale(.35);
+        }
+
+        .achievement-status-pill {
+            border-radius: 999px;
+            padding: 5px 8px;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: .55px;
+            text-transform: uppercase;
+        }
+
+        .achievement-status-pill.earned {
+            color: #5E52C6;
+            background: #EEEBFF;
+        }
+
+        .achievement-status-pill.locked {
+            color: #8A8FA2;
+            background: #ECECF1;
+        }
+
+        .achievement-title {
+            color: #30354D;
+            font-size: 14px;
+            font-weight: 800;
+            line-height: 1.3;
+        }
+
+        .achievement-description {
+            color: #7A8096;
+            font-size: 11.5px;
+            line-height: 1.5;
+            margin-top: 5px;
+            min-height: 34px;
+        }
+
+        .achievement-progress-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 12px;
+            color: #9297AA;
+            font-size: 10px;
+            font-weight: 700;
+        }
+
+        .achievement-progress {
+            height: 5px;
+            background: #E9E9F0;
+            border-radius: 999px;
+            overflow: hidden;
+            margin-top: 6px;
+        }
+
+        .achievement-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #7567DE, #9A8EF2);
+            border-radius: 999px;
+        }
+
+        .achievement-next-panel {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .achievement-next-item {
+            background: #F7F5FF;
+            border: 1px solid #E2DDF7;
+            border-radius: 14px;
+            padding: 13px 15px;
+        }
+
+        .achievement-next-label {
+            color: #8A8FA2;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: .65px;
+            text-transform: uppercase;
+        }
+
+        .achievement-next-value {
+            color: #393D58;
+            font-size: 13px;
+            font-weight: 750;
+            margin-top: 4px;
+        }
+
+        @media (max-width: 900px) {
+            .achievement-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 620px) {
+            .achievement-grid,
+            .achievement-summary,
+            .achievement-next-panel {
+                grid-template-columns: 1fr;
+            }
+        }
+
         </style>
         """,
         unsafe_allow_html=True,
@@ -1047,7 +1424,188 @@ def progress_page():
         unsafe_allow_html=True,
     )
 
-    st.write("")
+    # --------------------------------------------------------
+    # ACHIEVEMENTS + STREAKS
+    # --------------------------------------------------------
+    st.subheader("🏆 Achievements & Streaks")
+
+    achievement_data = _achievement_data(completed)
+
+    current_streak = achievement_data["current_streak"]
+    best_streak = achievement_data["best_streak"]
+    total_interviews = achievement_data["total"]
+
+    next_streak = achievement_data["next_streak"]
+    next_interview = achievement_data["next_interview"]
+    next_score = achievement_data["next_score"]
+    next_improvement = achievement_data["next_improvement"]
+
+    # --------------------------------------------------------
+    # SUMMARY
+    # --------------------------------------------------------
+    summary_1, summary_2, summary_3 = st.columns(3)
+
+    with summary_1:
+        with st.container(border=True):
+            st.caption("🔥 CURRENT STREAK")
+            st.markdown(f"### {current_streak} days")
+            st.caption(
+                "Practice today to keep it alive."
+                if current_streak
+                else "Complete an interview to start."
+            )
+
+    with summary_2:
+        with st.container(border=True):
+            st.caption("🏅 BEST STREAK")
+            st.markdown(f"### {best_streak} days")
+            if next_streak:
+                st.caption(f"Next milestone: {next_streak} days")
+            else:
+                st.caption("All streak milestones reached.")
+
+    with summary_3:
+        with st.container(border=True):
+            st.caption("🎯 INTERVIEWS COMPLETED")
+            st.markdown(f"### {total_interviews}")
+            if next_interview:
+                st.caption(f"Next milestone: {next_interview} interviews")
+            else:
+                st.caption("All interview milestones reached.")
+
+    # --------------------------------------------------------
+    # ACHIEVEMENT GROUPS
+    # --------------------------------------------------------
+    group_icons = {
+        "🔥 Practice Streak": "🔥",
+        "🎯 Interview Milestones": "🎯",
+        "🏆 Score Milestones": "🏆",
+        "📈 Improvement": "📈",
+    }
+
+    for group_title, cards in achievement_data["achievements"].items():
+
+        icon = group_icons.get(group_title, "🏆")
+        clean_title = (
+            group_title.split(" ", 1)[1]
+            if " " in group_title
+            else group_title
+        )
+
+        st.markdown(f"#### {icon} {clean_title}")
+
+        # Three cards per row keeps the dashboard compact and aligned.
+        for row_start in range(0, len(cards), 3):
+
+            row_cards = cards[row_start:row_start + 3]
+            columns = st.columns(3)
+
+            for column, achievement in zip(columns, row_cards):
+
+                with column:
+                    earned = achievement["earned"]
+                    target = achievement["target"]
+                    value = max(
+                        0.0,
+                        float(achievement.get("value", 0))
+                    )
+
+                    progress = (
+                        1.0
+                        if earned
+                        else min(value / target, 1.0)
+                        if target
+                        else 0.0
+                    )
+
+                    with st.container(border=True):
+
+                        top_left, top_right = st.columns(
+                            [1, 1]
+                        )
+
+                        with top_left:
+                            st.markdown(
+                                f"### {achievement['icon']}"
+                            )
+
+                        with top_right:
+                            if earned:
+                                st.success(
+                                    "✓ Earned",
+                                    icon="🏆"
+                                )
+                            else:
+                                st.caption("🔒 Locked")
+
+                        st.markdown(
+                            f"**{achievement['title']}**"
+                        )
+
+                        st.caption(
+                            achievement["description"]
+                        )
+
+                        if earned:
+                            st.progress(
+                                1.0,
+                                text="Completed · 100%"
+                            )
+                        else:
+                            st.progress(
+                                progress,
+                                text=(
+                                    f"{value:g} / {target:g} · "
+                                    f"{progress * 100:.0f}%"
+                                ),
+                            )
+
+            # Prevent the final short row from inheriting unwanted
+            # content in unused columns.
+            if len(row_cards) < 3:
+                for empty_column in columns[len(row_cards):]:
+                    with empty_column:
+                        st.write("")
+
+    # --------------------------------------------------------
+    # NEXT GOALS
+    # --------------------------------------------------------
+    next_targets = []
+
+    if next_streak:
+        next_targets.append(
+            f"🔥 Reach a {next_streak}-day streak"
+        )
+
+    if next_interview:
+        next_targets.append(
+            f"🎯 Complete {next_interview} interviews"
+        )
+
+    if next_score:
+        next_targets.append(
+            f"🏆 Score {next_score}% in an interview"
+        )
+
+    if next_improvement:
+        next_targets.append(
+            f"📈 Improve your recent average by "
+            f"{next_improvement} points"
+        )
+
+    if next_targets:
+        st.markdown("#### 🎯 Next Goals")
+
+        goal_columns = st.columns(
+            min(2, len(next_targets))
+        )
+
+        for index, target in enumerate(next_targets[:4]):
+
+            with goal_columns[index % len(goal_columns)]:
+                with st.container(border=True):
+                    st.caption("NEXT GOAL")
+                    st.markdown(f"**{target}**")
 
     if st.button(
         "🚀 Start Another Interview",
