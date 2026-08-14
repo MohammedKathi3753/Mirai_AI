@@ -294,6 +294,70 @@ st.html(
         color: #6B57E8 !important;
     }
 
+
+        /* ======================================================
+           MOBILE POLISH — NARROW SCREEN
+           ====================================================== */
+
+        @media (max-width: 640px) {
+
+            .block-container {
+                padding-left: 0.75rem !important;
+                padding-right: 0.75rem !important;
+                padding-top: 1.25rem !important;
+                padding-bottom: 2.5rem !important;
+            }
+
+            div[data-testid="stHorizontalBlock"] {
+                flex-wrap: wrap !important;
+                gap: 0.75rem !important;
+            }
+
+            div[data-testid="stHorizontalBlock"] > div {
+                flex: 1 1 100% !important;
+                min-width: 100% !important;
+                width: 100% !important;
+            }
+
+            h1 {
+                font-size: 1.8rem !important;
+                line-height: 1.2 !important;
+            }
+
+            h2 {
+                font-size: 1.4rem !important;
+            }
+
+            h3 {
+                font-size: 1.15rem !important;
+            }
+
+            .question-text {
+                font-size: 17px !important;
+                line-height: 1.55 !important;
+            }
+
+            .stTextArea textarea {
+                font-size: 16px !important;
+                min-height: 170px !important;
+            }
+
+            .stButton > button {
+                min-height: 48px !important;
+            }
+
+            div[data-testid="stMetric"] {
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }
+
+            pre,
+            code {
+                overflow-wrap: anywhere !important;
+                word-break: break-word !important;
+            }
+        }
+
     </style>
     """
 )

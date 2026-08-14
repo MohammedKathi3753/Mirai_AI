@@ -6,6 +6,84 @@ from database.database import (
     get_interview_answers,
 )
 
+
+# ============================================================
+# MOBILE RESPONSIVE UI
+# ============================================================
+
+st.markdown(
+    '''
+
+<style>
+@media (max-width: 640px) {
+    .block-container {
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+        padding-top: 1.25rem !important;
+        padding-bottom: 2.5rem !important;
+    }
+
+    h1 {
+        font-size: 1.8rem !important;
+        line-height: 1.2 !important;
+    }
+
+    h2 {
+        font-size: 1.4rem !important;
+        line-height: 1.25 !important;
+    }
+
+    h3 {
+        font-size: 1.15rem !important;
+        line-height: 1.3 !important;
+    }
+
+    div[data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+        gap: 0.75rem !important;
+    }
+
+    div[data-testid="stHorizontalBlock"] > div {
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+        width: 100% !important;
+    }
+
+    .stButton > button,
+    [data-testid="stFormSubmitButton"] button {
+        min-height: 48px !important;
+    }
+
+    .stTextInput input,
+    .stTextArea textarea {
+        font-size: 16px !important;
+    }
+
+    .stTextArea textarea {
+        min-height: 180px;
+    }
+
+    pre,
+    code,
+    [data-testid="stMarkdownContainer"] {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    [data-testid="stMetric"] {
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 14px !important;
+    }
+}
+</style>
+    ''',
+    unsafe_allow_html=True,
+)
+
 # ============================================================
 # HELPERS
 # ============================================================

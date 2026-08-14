@@ -1022,6 +1022,49 @@ def progress_page():
             margin-top: 4px;
         }
 
+
+        /* ======================================================
+           GENERIC MOBILE LAYOUT
+           ====================================================== */
+
+        @media (max-width: 640px) {
+
+            .block-container {
+                padding-left: 0.75rem !important;
+                padding-right: 0.75rem !important;
+                padding-top: 1.25rem !important;
+            }
+
+            div[data-testid="stHorizontalBlock"] {
+                flex-wrap: wrap !important;
+                gap: 0.75rem !important;
+            }
+
+            div[data-testid="stHorizontalBlock"] > div {
+                flex: 1 1 100% !important;
+                min-width: 100% !important;
+                width: 100% !important;
+            }
+
+            h1 {
+                font-size: 1.8rem !important;
+                line-height: 1.2 !important;
+            }
+
+            h2 {
+                font-size: 1.4rem !important;
+            }
+
+            h3 {
+                font-size: 1.15rem !important;
+            }
+
+            [data-testid="stMetric"] {
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }
+        }
+
         @media (max-width: 900px) {
             .achievement-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
