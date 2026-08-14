@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 
 from datetime import datetime
 
@@ -6,6 +7,7 @@ from database.database import (
     initialize_database,
     create_user,
     authenticate_user,
+    get_login_security_status,
     get_interview_history,
     get_interview_answers
 )
@@ -803,6 +805,118 @@ def login_page():
                 "Enter your account details to continue."
             )
 
+            # ------------------------------------------------
+            # LIVE LOGIN SECURITY STATUS
+            # ------------------------------------------------
+
+            status_email = st.session_state.get(
+                "login_status_email",
+                ""
+            )
+
+            if status_email:
+
+                try:
+                    security_status = get_login_security_status(
+                        status_email
+                    )
+                except Exception:
+                    security_status = {
+                        "attempts_left": 5,
+                        "locked": False,
+                        "seconds_remaining": 0
+                    }
+
+                if security_status["locked"]:
+
+                    seconds = int(
+                        security_status["seconds_remaining"]
+                    )
+
+                    st.error(
+                        "🔒 Too many unsuccessful login attempts."
+                    )
+
+                    components.html(
+                        f"""
+                        <div style="
+                            text-align:center;
+                            padding:14px 10px;
+                            border-radius:12px;
+                            background:#FFF4F4;
+                            border:1px solid #F2C7C7;
+                            font-family:Arial,sans-serif;
+                        ">
+                            <div style="
+                                font-size:14px;
+                                color:#7A3030;
+                                margin-bottom:6px;
+                            ">
+                                You can try again in
+                            </div>
+
+                            <div id="countdown" style="
+                                font-size:28px;
+                                font-weight:700;
+                                color:#B33A3A;
+                            ">
+                                Calculating...
+                            </div>
+                        </div>
+
+                        <script>
+                            let remaining = {seconds};
+
+                            function updateCountdown() {{
+                                if (remaining <= 0) {{
+                                    document.getElementById(
+                                        "countdown"
+                                    ).innerText = "You can try again now";
+                                    setTimeout(
+                                        () => window.parent.location.reload(),
+                                        1000
+                                    );
+                                    return;
+                                }}
+
+                                const minutes = Math.floor(
+                                    remaining / 60
+                                );
+                                const secs = remaining % 60;
+
+                                document.getElementById(
+                                    "countdown"
+                                ).innerText =
+                                    String(minutes).padStart(2, "0")
+                                    + ":"
+                                    + String(secs).padStart(2, "0");
+
+                                remaining--;
+                            }}
+
+                            updateCountdown();
+                            setInterval(updateCountdown, 1000);
+                        </script>
+                        """,
+                        height=105,
+                        scrolling=False
+                    )
+
+                else:
+
+                    attempts_left = int(
+                        security_status["attempts_left"]
+                    )
+
+                    if attempts_left < 5:
+
+                        st.warning(
+                            f"⚠️ {attempts_left} login "
+                            f"attempt"
+                            f"{'s' if attempts_left != 1 else ''} "
+                            "remaining before temporary lock."
+                        )
+
             with st.form("login_form"):
 
                 email = st.text_input(
@@ -827,6 +941,8 @@ def login_page():
 
                 email = email.strip()
 
+                st.session_state.login_status_email = email
+
                 if not email or not password:
 
                     st.error(
@@ -837,27 +953,69 @@ def login_page():
 
                     try:
 
-                        user = authenticate_user(
-                            email,
-                            password
+                        security_status = get_login_security_status(
+                            email
                         )
 
-                        if user is None:
+                        if security_status["locked"]:
 
                             st.error(
-                                "❌ Incorrect email or password."
+                                "🔒 Too many unsuccessful login "
+                                "attempts. Please wait for the "
+                                "lockout timer to finish."
                             )
 
                         else:
 
-                            st.session_state.user = user
+                            user = authenticate_user(
+                                email,
+                                password
+                            )
 
-                            go_to("dashboard")
+                            if user is None:
 
-                    except Exception as error:
+                                new_status = (
+                                    get_login_security_status(
+                                        email
+                                    )
+                                )
+
+                                if new_status["locked"]:
+
+                                    st.error(
+                                        "🔒 Too many unsuccessful "
+                                        "login attempts. Your account "
+                                        "is temporarily locked."
+                                    )
+
+                                else:
+
+                                    attempts_left = int(
+                                        new_status["attempts_left"]
+                                    )
+
+                                    st.error(
+                                        "❌ Incorrect email or password."
+                                    )
+
+                                    st.warning(
+                                        f"⚠️ {attempts_left} login "
+                                        f"attempt"
+                                        f"{'s' if attempts_left != 1 else ''} "
+                                        "remaining before temporary lock."
+                                    )
+
+                            else:
+
+                                st.session_state.user = user
+                                st.session_state.login_status_email = ""
+                                go_to("dashboard")
+
+                    except Exception:
 
                         st.error(
-                            f"Login error: {error}"
+                            "❌ Unable to sign in right now. "
+                            "Please try again later."
                         )
 
             st.write("")
@@ -878,7 +1036,9 @@ def login_page():
             "← Back to Welcome",
             use_container_width=True
         ):
+            st.session_state.login_status_email = ""
             go_to("welcome")
+
 
 
 # ============================================================
@@ -1098,7 +1258,8 @@ def signup_page():
                         else:
 
                             st.error(
-                                f"Account creation error: {error}"
+                                "❌ Unable to create your account "
+                                "right now. Please try again later."
                             )
 
         st.write("")

@@ -41,9 +41,13 @@ def get_connection():
 # PASSWORD SECURITY
 # ============================================================
 
-def hash_password(password, salt=None):
+def hash_password(password, salt=None, iterations=600_000):
     """
     Securely hash a password using PBKDF2-HMAC-SHA256.
+
+    New passwords use 600,000 iterations.
+    Existing passwords are verified using their stored
+    iteration count during the migration period.
     """
 
     if salt is None:
@@ -53,7 +57,7 @@ def hash_password(password, salt=None):
         "sha256",
         password.encode("utf-8"),
         salt.encode("utf-8"),
-        100_000
+        iterations
     )
 
     return (
@@ -62,14 +66,20 @@ def hash_password(password, salt=None):
     )
 
 
-def verify_password(password, salt, stored_hash):
+def verify_password(
+    password,
+    salt,
+    stored_hash,
+    iterations=600_000
+):
     """
     Verify a password against its stored hash.
     """
 
     _, password_hash = hash_password(
         password,
-        salt
+        salt,
+        iterations
     )
 
     return secrets.compare_digest(
@@ -109,6 +119,8 @@ def initialize_database():
 
             password_salt TEXT NOT NULL,
 
+            password_iterations INTEGER NOT NULL DEFAULT 600000,
+
             education TEXT,
 
             target_job_role TEXT,
@@ -121,6 +133,38 @@ def initialize_database():
 
             created_at TEXT NOT NULL,
 
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    # ========================================================
+    # SECURITY MIGRATION
+    # ========================================================
+
+    try:
+        cursor.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN password_iterations
+            INTEGER NOT NULL DEFAULT 100000
+            """
+        )
+    except sqlite3.OperationalError as error:
+        if "duplicate column name" not in str(error).lower():
+            raise
+
+    # ========================================================
+    # LOGIN SECURITY
+    # ========================================================
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS login_security (
+            email TEXT PRIMARY KEY,
+            failed_attempts INTEGER NOT NULL DEFAULT 0,
+            locked_until TEXT,
+            last_failed_at TEXT,
             updated_at TEXT NOT NULL
         )
         """
@@ -511,7 +555,8 @@ def create_user(
         # ----------------------------------------------------
 
         salt, password_hash = hash_password(
-            password
+            password,
+            iterations=600_000
         )
 
         now = datetime.now().isoformat()
@@ -528,6 +573,7 @@ def create_user(
                 email,
                 password_hash,
                 password_salt,
+                password_iterations,
                 education,
                 target_job_role,
                 experience_level,
@@ -538,13 +584,14 @@ def create_user(
 
             )
 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 full_name.strip(),
                 email,
                 password_hash,
                 salt,
+                600_000,
                 education.strip(),
                 target_job_role.strip(),
                 "",
@@ -609,6 +656,197 @@ def create_user(
 
 
 # ============================================================
+# LOGIN BRUTE-FORCE PROTECTION
+# ============================================================
+
+LOGIN_MAX_FAILED_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 10
+
+
+def _get_login_security(cursor, email):
+    cursor.execute(
+        """
+        SELECT
+            email,
+            failed_attempts,
+            locked_until,
+            last_failed_at,
+            updated_at
+        FROM login_security
+        WHERE email = ?
+        """,
+        (email,)
+    )
+    return cursor.fetchone()
+
+
+def _is_login_locked(record):
+    if record is None or not record["locked_until"]:
+        return False
+
+    try:
+        locked_until = datetime.fromisoformat(
+            record["locked_until"]
+        )
+        return datetime.now() < locked_until
+    except (TypeError, ValueError):
+        return False
+
+
+def _record_failed_login(cursor, email):
+    now = datetime.now()
+
+    record = _get_login_security(cursor, email)
+
+    if record is None:
+        failed_attempts = 1
+    else:
+        # If a previous lock has expired, start a fresh failure window.
+        previous_locked_until = record["locked_until"]
+
+        if previous_locked_until:
+            try:
+                if datetime.now() >= datetime.fromisoformat(
+                    previous_locked_until
+                ):
+                    failed_attempts = 1
+                else:
+                    failed_attempts = int(
+                        record["failed_attempts"] or 0
+                    ) + 1
+            except (TypeError, ValueError):
+                failed_attempts = 1
+        else:
+            failed_attempts = int(
+                record["failed_attempts"] or 0
+            ) + 1
+
+    locked_until = None
+
+    if failed_attempts >= LOGIN_MAX_FAILED_ATTEMPTS:
+        locked_until = (
+            now.timestamp()
+        )
+
+        from datetime import timedelta
+
+        locked_until = (
+            now + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+        ).isoformat()
+
+    cursor.execute(
+        """
+        INSERT INTO login_security (
+            email,
+            failed_attempts,
+            locked_until,
+            last_failed_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(email) DO UPDATE SET
+            failed_attempts = excluded.failed_attempts,
+            locked_until = excluded.locked_until,
+            last_failed_at = excluded.last_failed_at,
+            updated_at = excluded.updated_at
+        """,
+        (
+            email,
+            failed_attempts,
+            locked_until,
+            now.isoformat(),
+            now.isoformat()
+        )
+    )
+
+    return failed_attempts, locked_until
+
+
+def _clear_failed_logins(cursor, email):
+    cursor.execute(
+        """
+        DELETE FROM login_security
+        WHERE email = ?
+        """,
+        (email,)
+    )
+
+
+def get_login_security_status(email):
+    """
+    Return safe login-attempt information for the login UI.
+
+    This intentionally exposes only:
+        - attempts remaining
+        - whether the account is temporarily locked
+        - seconds remaining in the lockout
+
+    It does not expose password data.
+    """
+
+    email = (email or "").strip().lower()
+
+    if not email:
+        return {
+            "attempts_left": LOGIN_MAX_FAILED_ATTEMPTS,
+            "locked": False,
+            "seconds_remaining": 0
+        }
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        record = _get_login_security(
+            cursor,
+            email
+        )
+
+        if record is None:
+            return {
+                "attempts_left": LOGIN_MAX_FAILED_ATTEMPTS,
+                "locked": False,
+                "seconds_remaining": 0
+            }
+
+        locked_until = record["locked_until"]
+
+        if locked_until:
+            try:
+                remaining = int(
+                    (
+                        datetime.fromisoformat(locked_until)
+                        - datetime.now()
+                    ).total_seconds()
+                )
+
+                if remaining > 0:
+                    return {
+                        "attempts_left": 0,
+                        "locked": True,
+                        "seconds_remaining": remaining
+                    }
+            except (TypeError, ValueError):
+                pass
+
+        failed_attempts = int(
+            record["failed_attempts"] or 0
+        )
+
+        return {
+            "attempts_left": max(
+                0,
+                LOGIN_MAX_FAILED_ATTEMPTS - failed_attempts
+            ),
+            "locked": False,
+            "seconds_remaining": 0
+        }
+
+    finally:
+        connection.close()
+
+
+# ============================================================
 # AUTHENTICATE USER
 # ============================================================
 
@@ -617,7 +855,7 @@ def authenticate_user(
     password
 ):
     """
-    Authenticate an existing user.
+    Authenticate an existing user with brute-force protection.
 
     Returns:
         User dictionary if successful.
@@ -625,12 +863,27 @@ def authenticate_user(
     """
 
     connection = get_connection()
-
     cursor = connection.cursor()
 
     email = email.strip().lower()
 
     try:
+
+        # ----------------------------------------------------
+        # Check lockout state before verifying password
+        # ----------------------------------------------------
+
+        security_record = _get_login_security(
+            cursor,
+            email
+        )
+
+        if _is_login_locked(security_record):
+            return None
+
+        # ----------------------------------------------------
+        # Find user
+        # ----------------------------------------------------
 
         cursor.execute(
             """
@@ -643,26 +896,79 @@ def authenticate_user(
 
         user = cursor.fetchone()
 
+        # Do not reveal whether an email exists.
         if user is None:
-
+            _record_failed_login(
+                cursor,
+                email
+            )
+            connection.commit()
             return None
 
         # ----------------------------------------------------
         # Verify password
         # ----------------------------------------------------
 
+        stored_iterations = user["password_iterations"]
+
         valid_password = verify_password(
             password,
             user["password_salt"],
-            user["password_hash"]
+            user["password_hash"],
+            stored_iterations
         )
 
         if not valid_password:
-
+            _record_failed_login(
+                cursor,
+                email
+            )
+            connection.commit()
             return None
 
         # ----------------------------------------------------
-        # Return user data
+        # Successful login
+        # ----------------------------------------------------
+
+        _clear_failed_logins(
+            cursor,
+            email
+        )
+
+        # ----------------------------------------------------
+        # Upgrade legacy password hashes
+        # ----------------------------------------------------
+
+        if stored_iterations < 600_000:
+
+            new_salt, new_hash = hash_password(
+                password,
+                iterations=600_000
+            )
+
+            cursor.execute(
+                """
+                UPDATE users
+                SET
+                    password_hash = ?,
+                    password_salt = ?,
+                    password_iterations = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    new_hash,
+                    new_salt,
+                    600_000,
+                    datetime.now().isoformat(),
+                    user["id"]
+                )
+            )
+
+        connection.commit()
+
+        # ----------------------------------------------------
+        # Return safe user data only
         # ----------------------------------------------------
 
         return {
@@ -678,8 +984,11 @@ def authenticate_user(
             "updated_at": user["updated_at"]
         }
 
-    finally:
+    except Exception:
+        connection.rollback()
+        return None
 
+    finally:
         connection.close()
 
 
