@@ -1326,6 +1326,8 @@ if (
 
             question_id = save_question(
 
+                user["id"],
+
                 interview_id,
 
                 1,
@@ -1710,6 +1712,8 @@ elif (
 
             answer_id = save_answer(
 
+                user["id"],
+
                 st.session_state.interview_id,
 
                 question_id,
@@ -1851,6 +1855,8 @@ elif (
         try:
 
             save_evaluation(
+
+                user["id"],
 
                 answer_id,
 
@@ -2006,6 +2012,8 @@ elif (
 
                 complete_interview(
 
+                    user["id"],
+
                     st.session_state.interview_id,
 
                     overall,
@@ -2115,6 +2123,8 @@ elif (
         try:
 
             next_question_id = save_question(
+
+                user["id"],
 
                 st.session_state.interview_id,
 

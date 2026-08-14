@@ -1208,6 +1208,68 @@ def delete_user_resume(
 
 
 # ============================================================
+# AUTHORIZATION / RESOURCE OWNERSHIP
+# ============================================================
+
+def _interview_belongs_to_user(cursor, interview_id, user_id):
+    """Return True only when the interview belongs to the user."""
+    cursor.execute(
+        """
+        SELECT 1
+        FROM interviews
+        WHERE id = ? AND user_id = ?
+        LIMIT 1
+        """,
+        (interview_id, user_id)
+    )
+    return cursor.fetchone() is not None
+
+
+def _question_belongs_to_interview(cursor, question_id, interview_id):
+    """Return True only when the question belongs to the interview."""
+    cursor.execute(
+        """
+        SELECT 1
+        FROM interview_questions
+        WHERE id = ? AND interview_id = ?
+        LIMIT 1
+        """,
+        (question_id, interview_id)
+    )
+    return cursor.fetchone() is not None
+
+
+def _answer_belongs_to_interview(cursor, answer_id, interview_id):
+    """Return True only when the answer belongs to the interview."""
+    cursor.execute(
+        """
+        SELECT 1
+        FROM answers
+        WHERE id = ? AND interview_id = ?
+        LIMIT 1
+        """,
+        (answer_id, interview_id)
+    )
+    return cursor.fetchone() is not None
+
+
+def _answer_belongs_to_user(cursor, answer_id, user_id):
+    """Return True only when the answer belongs to an interview owned by the user."""
+    cursor.execute(
+        """
+        SELECT 1
+        FROM answers AS a
+        JOIN interviews AS i
+            ON a.interview_id = i.id
+        WHERE a.id = ? AND i.user_id = ?
+        LIMIT 1
+        """,
+        (answer_id, user_id)
+    )
+    return cursor.fetchone() is not None
+
+
+# ============================================================
 # CREATE INTERVIEW
 # ============================================================
 
@@ -1292,6 +1354,7 @@ def create_interview(
 # ============================================================
 
 def save_question(
+    user_id,
     interview_id,
     question_number,
     question_text,
@@ -1300,20 +1363,20 @@ def save_question(
     topic=None,
     expected_concepts=None
 ):
-    """
-    Save an AI-generated interview question.
-    """
+    """Save a question only to an interview owned by user_id."""
 
     connection = get_connection()
-
     cursor = connection.cursor()
 
     try:
+        if not _interview_belongs_to_user(
+            cursor, interview_id, user_id
+        ):
+            return None
 
         cursor.execute(
             """
             INSERT INTO interview_questions (
-
                 interview_id,
                 question_number,
                 question_text,
@@ -1323,9 +1386,7 @@ def save_question(
                 expected_concepts,
                 generated_by,
                 created_at
-
             )
-
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -1342,19 +1403,13 @@ def save_question(
         )
 
         question_id = cursor.lastrowid
-
         connection.commit()
-
         return question_id
 
     except Exception:
-
         connection.rollback()
-
         return None
-
     finally:
-
         connection.close()
 
 
@@ -1363,33 +1418,37 @@ def save_question(
 # ============================================================
 
 def save_answer(
+    user_id,
     interview_id,
     question_id,
     user_answer,
     response_time_seconds=None
 ):
-    """
-    Save a candidate's answer.
-    """
+    """Save an answer only when both interview and question belong together and the interview belongs to user_id."""
 
     connection = get_connection()
-
     cursor = connection.cursor()
 
     try:
+        if not _interview_belongs_to_user(
+            cursor, interview_id, user_id
+        ):
+            return None
+
+        if not _question_belongs_to_interview(
+            cursor, question_id, interview_id
+        ):
+            return None
 
         cursor.execute(
             """
             INSERT INTO answers (
-
                 interview_id,
                 question_id,
                 user_answer,
                 response_time_seconds,
                 created_at
-
             )
-
             VALUES (?, ?, ?, ?, ?)
             """,
             (
@@ -1403,32 +1462,23 @@ def save_answer(
 
         answer_id = cursor.lastrowid
 
-        # Update completed question count
-
         cursor.execute(
             """
             UPDATE interviews
-
             SET completed_questions =
                 completed_questions + 1
-
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
-            (interview_id,)
+            (interview_id, user_id)
         )
 
         connection.commit()
-
         return answer_id
 
     except Exception:
-
         connection.rollback()
-
         return None
-
     finally:
-
         connection.close()
 
 
@@ -1437,6 +1487,7 @@ def save_answer(
 # ============================================================
 
 def save_evaluation(
+    user_id,
     answer_id,
     overall_score=None,
     technical_score=None,
@@ -1450,20 +1501,20 @@ def save_evaluation(
     feedback=None,
     recommended_action=None
 ):
-    """
-    Save AI evaluation for an answer.
-    """
+    """Save an evaluation only for an answer belonging to the authenticated user."""
 
     connection = get_connection()
-
     cursor = connection.cursor()
 
     try:
+        if not _answer_belongs_to_user(
+            cursor, answer_id, user_id
+        ):
+            return False
 
         cursor.execute(
             """
             INSERT OR REPLACE INTO evaluations (
-
                 answer_id,
                 overall_score,
                 technical_score,
@@ -1477,9 +1528,7 @@ def save_evaluation(
                 feedback,
                 recommended_action,
                 created_at
-
             )
-
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
@@ -1500,17 +1549,12 @@ def save_evaluation(
         )
 
         connection.commit()
-
         return True
 
     except Exception:
-
         connection.rollback()
-
         return False
-
     finally:
-
         connection.close()
 
 
@@ -1519,6 +1563,7 @@ def save_evaluation(
 # ============================================================
 
 def complete_interview(
+    user_id,
     interview_id,
     overall_score=None,
     technical_score=None,
@@ -1527,41 +1572,32 @@ def complete_interview(
     answer_structure_score=None,
     readiness_score=None
 ):
-    """
-    Mark an interview as completed.
-    """
+    """Complete an interview only when it belongs to user_id."""
 
     connection = get_connection()
-
     cursor = connection.cursor()
 
     try:
+        if not _interview_belongs_to_user(
+            cursor, interview_id, user_id
+        ):
+            return False
 
         now = datetime.now().isoformat()
 
         cursor.execute(
             """
             UPDATE interviews
-
             SET
-
                 status = 'completed',
-
                 overall_score = ?,
-
                 technical_score = ?,
-
                 communication_score = ?,
-
                 problem_solving_score = ?,
-
                 answer_structure_score = ?,
-
                 readiness_score = ?,
-
                 completed_at = ?
-
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 overall_score,
@@ -1571,22 +1607,18 @@ def complete_interview(
                 answer_structure_score,
                 readiness_score,
                 now,
-                interview_id
+                interview_id,
+                user_id
             )
         )
 
         connection.commit()
-
-        return True
+        return cursor.rowcount > 0
 
     except Exception:
-
         connection.rollback()
-
         return False
-
     finally:
-
         connection.close()
 
 
@@ -1676,40 +1708,36 @@ def get_interview_history(
 # ============================================================
 
 def get_interview_questions(
+    user_id,
     interview_id
 ):
-    """
-    Get all questions for an interview.
-    """
+    """Get questions only for an interview owned by user_id."""
 
     connection = get_connection()
-
     cursor = connection.cursor()
 
     try:
+        if not _interview_belongs_to_user(
+            cursor, interview_id, user_id
+        ):
+            return []
 
         cursor.execute(
             """
             SELECT *
-
             FROM interview_questions
-
             WHERE interview_id = ?
-
             ORDER BY question_number ASC
             """,
             (interview_id,)
         )
 
-        questions = cursor.fetchall()
-
         return [
             dict(question)
-            for question in questions
+            for question in cursor.fetchall()
         ]
 
     finally:
-
         connection.close()
 
 
@@ -1718,73 +1746,51 @@ def get_interview_questions(
 # ============================================================
 
 def get_interview_answers(
+    user_id,
     interview_id
 ):
-    """
-    Get all answers for an interview.
-    """
+    """Get answers/evaluations only for an interview owned by user_id."""
 
     connection = get_connection()
-
     cursor = connection.cursor()
 
     try:
+        if not _interview_belongs_to_user(
+            cursor, interview_id, user_id
+        ):
+            return []
 
         cursor.execute(
             """
             SELECT
-
                 answers.*,
-
                 interview_questions.question_text,
-
                 evaluations.overall_score,
-
                 evaluations.technical_score,
-
                 evaluations.communication_score,
-
                 evaluations.problem_solving_score,
-
                 evaluations.answer_structure_score,
-
                 evaluations.strengths,
-
                 evaluations.weaknesses,
-
                 evaluations.feedback,
-
                 evaluations.recommended_action
-
             FROM answers
-
             JOIN interview_questions
-
-                ON answers.question_id =
-                   interview_questions.id
-
+                ON answers.question_id = interview_questions.id
             LEFT JOIN evaluations
-
-                ON answers.id =
-                   evaluations.answer_id
-
+                ON answers.id = evaluations.answer_id
             WHERE answers.interview_id = ?
-
-            ORDER BY
-                interview_questions.question_number ASC
+            ORDER BY interview_questions.question_number ASC
             """,
             (interview_id,)
         )
 
-        answers = cursor.fetchall()
-
         return [
             dict(answer)
-            for answer in answers
+            for answer in cursor.fetchall()
         ]
 
     finally:
-
         connection.close()
 
 

@@ -326,7 +326,7 @@ def history_page():
                 st.subheader("📝 Questions, Answers & Feedback")
 
                 try:
-                    answer_rows = get_interview_answers(interview_id)
+                    answer_rows = get_interview_answers(user["id"], interview_id)
                 except Exception as error:
                     st.error(
                         f"Could not load interview details: {error}"

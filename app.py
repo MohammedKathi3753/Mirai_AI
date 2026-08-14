@@ -1948,7 +1948,7 @@ def feedback_page():
     # ========================================================
 
     try:
-        evaluations = get_interview_answers(interview_id)
+        evaluations = get_interview_answers(user["id"], interview_id)
     except Exception as error:
         st.error(
             f"Could not load interview feedback: {error}"
