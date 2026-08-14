@@ -1,5 +1,8 @@
 import html
+import os
+from io import BytesIO
 import streamlit as st
+import streamlit.components.v1 as components
 
 from database.database import (
     create_interview,
@@ -7,8 +10,6 @@ from database.database import (
     save_answer,
     save_evaluation,
     complete_interview,
-    update_topic_performance,
-    get_weak_topics,
 )
 
 # IMPORTANT:
@@ -19,6 +20,65 @@ from src.interview.interview_engine import (
     evaluate_answer,
     calculate_readiness_score,
 )
+
+
+# ============================================================
+# VOICE TRANSCRIPTION
+# ============================================================
+
+def transcribe_voice_answer(audio_file):
+    """Transcribe a microphone recording using Groq Whisper."""
+
+    if audio_file is None:
+        return None
+
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+
+        api_key = (
+            os.getenv("GROQ_API_KEY")
+            or os.getenv("MIRAI_GROQ_API_KEY")
+        )
+
+        if not api_key:
+            return None
+
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
+
+        audio_bytes = audio_file.getvalue()
+
+        if not audio_bytes:
+            return None
+
+        result = client.audio.transcriptions.create(
+            model="whisper-large-v3-turbo",
+            file=(
+                getattr(
+                    audio_file,
+                    "name",
+                    "mirai_voice_answer.wav",
+                ),
+                BytesIO(audio_bytes),
+                getattr(
+                    audio_file,
+                    "type",
+                    "audio/wav",
+                ),
+            ),
+        )
+
+        transcript = getattr(result, "text", "")
+
+        return transcript.strip() if transcript else None
+
+    except Exception:
+        return None
 
 
 # ============================================================
@@ -307,34 +367,6 @@ if "id" not in user:
 
 
 # ============================================================
-# CANDIDATE PROFILE
-# ============================================================
-
-# The profile saved from My Profile is the source of truth
-# for candidate-specific interview information.
-candidate_profile = {
-    "full_name": str(user.get("full_name", "") or "").strip(),
-    "education": str(user.get("education", "") or "").strip(),
-    "target_job_role": str(
-        user.get("target_job_role", "") or ""
-    ).strip(),
-    "experience_level": str(
-        user.get("experience_level", "") or ""
-    ).strip(),
-    "technical_skills": str(
-        user.get("technical_skills", "") or ""
-    ).strip(),
-    "career_goal": str(
-        user.get("career_goal", "") or ""
-    ).strip(),
-}
-
-# Keep a copy in session state so the interview engine and
-# future interview components can use the same profile snapshot.
-st.session_state["interview_profile"] = candidate_profile
-
-
-# ============================================================
 # HELPER: NORMALIZE QUESTION
 # ============================================================
 
@@ -380,45 +412,10 @@ def normalize_question(question):
         keywords = []
 
 
-    # Preserve interview metadata returned by the engine.
-    # This is important for AI evaluation because the evaluator
-    # needs the actual role, interview type, and difficulty.
-    difficulty = str(
-        question.get(
-            "difficulty",
-            "Adaptive",
-        )
-    ).strip() or "Adaptive"
-
-    role_category = str(
-        question.get(
-            "role_category",
-            "General",
-        )
-    ).strip() or "General"
-
-    question_interview_type = str(
-        question.get(
-            "interview_type",
-            "Technical",
-        )
-    ).strip() or "Technical"
-
-    focus = str(
-        question.get(
-            "focus_area",
-            "",
-        )
-    ).strip()
-
     return {
         "question": question_text,
         "topic": topic or "General",
         "keywords": keywords,
-        "difficulty": difficulty,
-        "role_category": role_category,
-        "interview_type": question_interview_type,
-        "focus_area": focus,
     }
 
 
@@ -459,11 +456,6 @@ def generate_unique_question(
     scores,
     used_questions,
     question_number,
-    target_role=None,
-    requested_difficulty="Adaptive",
-    focus_area=None,
-    profile_context=None,
-    weakness_context=None,
 ):
 
     used_keys = {
@@ -488,20 +480,6 @@ def generate_unique_question(
             used_questions,
 
             question_number,
-
-            target_role=target_role,
-
-            requested_difficulty=requested_difficulty,
-
-            focus_area=focus_area,
-
-            profile_context=(
-                profile_context
-                if profile_context is not None
-                else candidate_profile
-            ),
-
-            weakness_context=weakness_context,
         )
 
 
@@ -526,51 +504,6 @@ def generate_unique_question(
 
 
     return None
-
-
-# ============================================================
-# HELPER: TOPIC WEAKNESS CONTEXT
-# ============================================================
-
-def build_topic_weakness_context(user_id):
-    """
-    Return a compact summary of the candidate's weakest tracked topics.
-    """
-
-    try:
-        weak_topics = get_weak_topics(
-            user_id,
-            limit=3,
-        )
-    except Exception:
-        return ""
-
-    if not weak_topics:
-        return ""
-
-    parts = []
-
-    for item in weak_topics:
-        topic = str(
-            item.get("topic", "General")
-        ).strip()
-
-        try:
-            score = float(
-                item.get("average_score", 0)
-            )
-        except (
-            TypeError,
-            ValueError,
-        ):
-            score = 0.0
-
-        if topic:
-            parts.append(
-                f"{topic} ({score:.1f}% average)"
-            )
-
-    return "; ".join(parts)
 
 
 # ============================================================
@@ -890,7 +823,6 @@ def reset_interview():
 
     st.session_state.final_result = None
 
-
 # ============================================================
 # PAGE HEADER
 # ============================================================
@@ -1116,54 +1048,6 @@ if (
 
 
     # --------------------------------------------------------
-    # Candidate profile used for this interview
-    # --------------------------------------------------------
-
-    st.subheader("👤 Candidate Profile")
-
-    profile_col1, profile_col2 = st.columns(2)
-
-    with profile_col1:
-        st.caption("TARGET JOB ROLE")
-        st.write(
-            candidate_profile["target_job_role"]
-            or "Not provided"
-        )
-
-        st.caption("EDUCATION")
-        st.write(
-            candidate_profile["education"]
-            or "Not provided"
-        )
-
-        st.caption("EXPERIENCE")
-        st.write(
-            candidate_profile["experience_level"]
-            or "Not provided"
-        )
-
-    with profile_col2:
-        st.caption("TECHNICAL SKILLS")
-        st.write(
-            candidate_profile["technical_skills"]
-            or "Not provided"
-        )
-
-        st.caption("CAREER GOAL")
-        st.write(
-            candidate_profile["career_goal"]
-            or "Not provided"
-        )
-
-    st.caption(
-        "💡 These details come from My Profile and are used by "
-        "Mirai AI to personalize your interview questions."
-    )
-
-    st.write("")
-
-
-    # --------------------------------------------------------
     # Begin interview
     # --------------------------------------------------------
 
@@ -1210,14 +1094,31 @@ if (
         )
 
 
-        # Target role comes from the saved profile.
-        # The previous selected-job-role value is only a fallback
-        # for older sessions that may not have profile data yet.
         target_role = (
-            candidate_profile["target_job_role"]
-            or st.session_state.get("selected_job_role")
-            or "AI/ML Engineer"
+            st.session_state.get(
+                "selected_job_role"
+            )
         )
+
+
+        if not target_role:
+
+            if isinstance(
+                user,
+                dict
+            ):
+
+                target_role = user.get(
+                    "target_job_role",
+                    "AI/ML Engineer"
+                )
+
+
+        if not target_role:
+
+            target_role = (
+                "AI/ML Engineer"
+            )
 
 
         total_questions = (
@@ -1337,34 +1238,6 @@ if (
                 [],
 
                 1,
-
-                target_role=target_role,
-
-                requested_difficulty=difficulty,
-
-                focus_area=focus_area,
-
-                profile_context=candidate_profile,
-
-                # True adaptive behavior:
-                # target the next question at the weakness found
-                # in the previous AI evaluation.
-                weakness_context=(
-                    build_topic_weakness_context(
-                        user["id"]
-                    )
-                    or (
-                        st.session_state.last_evaluation.get(
-                            "weaknesses",
-                            "",
-                        )
-                        if isinstance(
-                            st.session_state.last_evaluation,
-                            dict,
-                        )
-                        else ""
-                    )
-                ),
             )
         )
 
@@ -1547,32 +1420,179 @@ elif (
 
 
     # --------------------------------------------------------
+    # MIRAI VOICE QUESTION
+    # --------------------------------------------------------
+
+    # Use the browser's native Speech Synthesis API.
+    # This avoids an extra API call, API-key dependency, and
+    # audio-generation latency while keeping the interview flow
+    # completely unchanged.
+    question_text_for_audio = str(
+        question.get("question", "")
+    ).strip()
+
+    voice_col1, voice_col2 = st.columns([1, 4])
+
+    with voice_col1:
+        components.html(
+            f'''
+            <button
+                onclick="speakQuestion()"
+                style="
+                    width:100%;
+                    min-height:50px;
+                    border:1px solid #DCD7FF;
+                    border-radius:15px;
+                    background:linear-gradient(135deg,#6754E8,#8271EF);
+                    color:white;
+                    font-size:16px;
+                    font-weight:700;
+                    cursor:pointer;
+                    box-shadow:0 10px 25px rgba(103,84,232,0.15);
+                "
+            >
+                🔊 Hear Question
+            </button>
+
+            <script>
+            function speakQuestion() {{
+                const text = {question_text_for_audio!r};
+
+                if (!("speechSynthesis" in window)) {{
+                    alert("Voice playback is not supported by this browser.");
+                    return;
+                }}
+
+                window.speechSynthesis.cancel();
+
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.95;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+
+                const voices = window.speechSynthesis.getVoices();
+                const englishVoice = voices.find(
+                    voice => voice.lang && voice.lang.toLowerCase().startsWith("en")
+                );
+
+                if (englishVoice) {{
+                    utterance.voice = englishVoice;
+                }}
+
+                window.speechSynthesis.speak(utterance);
+            }}
+            </script>
+            ''',
+            height=65,
+            scrolling=False,
+        )
+
+    with voice_col2:
+        st.caption(
+            "Listen to Mirai read the question aloud. "
+            "The text question remains available above."
+        )
+
+
+    # --------------------------------------------------------
     # Answer
     # --------------------------------------------------------
 
-    answer = st.text_area(
+    # --------------------------------------------------------
+    # ANSWER METHOD
+    # --------------------------------------------------------
 
-        "Your Answer",
-
-        height=220,
-
-        placeholder=(
-            "Explain your answer clearly. "
-            "Use examples where possible..."
-        ),
-
-        key=(
-            f"answer_box_"
-            f"{question_number}"
-        ),
+    answer_mode = st.radio(
+        "Answer method",
+        ["⌨️ Type Answer", "🎙️ Voice Answer"],
+        horizontal=True,
+        key=f"answer_mode_{question_number}",
     )
 
+    answer = ""
+
+    if answer_mode == "⌨️ Type Answer":
+
+        answer = st.text_area(
+            "Your Answer",
+            height=220,
+            placeholder=(
+                "Explain your answer clearly. "
+                "Use examples where possible..."
+            ),
+            key=f"answer_box_{question_number}",
+        )
+
+    else:
+
+        st.caption(
+            "🎙️ Record your answer. Mirai will convert your speech "
+            "to text so you can review it before submitting."
+        )
+
+        audio_file = st.audio_input(
+            "Record your answer",
+            sample_rate=16000,
+            key=f"voice_answer_{question_number}",
+        )
+
+        if audio_file is not None:
+
+            signature = (
+                f"{question_number}:"
+                f"{len(audio_file.getvalue())}"
+            )
+
+            if st.session_state.get(
+                "voice_transcript_signature"
+            ) != signature:
+
+                with st.spinner(
+                    "🎧 Converting your answer to text..."
+                ):
+
+                    transcript = transcribe_voice_answer(
+                        audio_file
+                    )
+
+                st.session_state.voice_transcript = (
+                    transcript or ""
+                )
+
+                st.session_state.voice_transcript_signature = (
+                    signature
+                )
+
+            transcript = st.session_state.get(
+                "voice_transcript",
+                ""
+            )
+
+            if transcript:
+
+                st.success(
+                    "Voice answer transcribed. "
+                    "Review the text before submitting."
+                )
+
+                answer = st.text_area(
+                    "Review your transcription",
+                    value=transcript,
+                    height=220,
+                    key=f"voice_review_{question_number}",
+                )
+
+            else:
+
+                st.warning(
+                    "I couldn't transcribe that recording. "
+                    "Please record again or switch to Type Answer."
+                )
 
     st.caption(
         "💡 Tip: A strong answer usually includes "
         "your reasoning, an example, and the result."
     )
-
 
     st.write("")
 
@@ -1824,32 +1844,6 @@ elif (
             st.stop()
 
 
-            st.stop()
-
-
-        # ----------------------------------------------------
-        # UPDATE TOPIC PERFORMANCE
-        # ----------------------------------------------------
-        # The question already contains its normalized topic. Record
-        # the answer's overall score against that topic.
-        try:
-            update_topic_performance(
-                user["id"],
-                question.get(
-                    "topic",
-                    "General"
-                ),
-                evaluation[
-                    "overall_score"
-                ],
-            )
-        except Exception as error:
-            # Topic analytics must never break the interview itself.
-            st.warning(
-                f"Topic performance could not be updated: {error}"
-            )
-
-
         # ----------------------------------------------------
         # Store evaluation
         # ----------------------------------------------------
@@ -1996,15 +1990,8 @@ elif (
 
             st.session_state.interview_finished = True
 
-            # ----------------------------------------------------
-            # DIRECT REDIRECT TO INTERVIEW FEEDBACK
-            # ----------------------------------------------------
-            # The completed interview is already saved in the
-            # database above. Send the user directly to the main
-            # app's Feedback page instead of showing the old
-            # in-page Results screen.
-            st.session_state.page = "feedback"
-            st.switch_page("app.py")
+
+            st.rerun()
 
 
         # ----------------------------------------------------
@@ -2042,38 +2029,6 @@ elif (
                 st.session_state.used_questions,
 
                 next_number,
-                target_role=st.session_state.get(
-                    "selected_job_role",
-                    "AI/ML Engineer"
-                ),
-                requested_difficulty=difficulty,
-                focus_area=st.session_state.get(
-                    "selected_focus_area",
-                    "Overall Performance"
-                ),
-
-                profile_context=candidate_profile,
-                weakness_context=(
-                    build_topic_weakness_context(
-                        user["id"]
-                    )
-                    + (
-                        " | "
-                        + st.session_state.last_evaluation.get(
-                            "weaknesses",
-                            "",
-                        )
-                        if isinstance(
-                            st.session_state.last_evaluation,
-                            dict,
-                        )
-                        and st.session_state.last_evaluation.get(
-                            "weaknesses",
-                            "",
-                        )
-                        else ""
-                    )
-                ),
             )
         )
 
@@ -2153,7 +2108,6 @@ elif (
         st.session_state.current_question = (
             next_question
         )
-
 
         st.session_state.question_ids.append(
             next_question_id
