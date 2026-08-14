@@ -47,6 +47,90 @@ def _score_class(score):
     return "focus"
 
 
+def _valid_score(value):
+    try:
+        return value is not None and float(value) >= 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _average_for(interviews, field):
+    values = [
+        float(item.get(field))
+        for item in interviews
+        if _valid_score(item.get(field))
+    ]
+    return sum(values) / len(values) if values else 0.0
+
+
+def _change(current, previous):
+    if previous is None:
+        return 0.0
+    return round(float(current) - float(previous), 1)
+
+
+def _direction(change):
+    if change > 2:
+        return "Improving"
+    if change < -2:
+        return "Declining"
+    return "Stable"
+
+
+def _trend_class(change):
+    if change > 2:
+        return "trend-positive"
+    if change < -2:
+        return "trend-negative"
+    return "trend-neutral"
+
+
+def _trend_symbol(change):
+    if change > 2:
+        return "↑"
+    if change < -2:
+        return "↓"
+    return "→"
+
+
+def _skill_analytics(interviews):
+    fields = [
+        ("Technical Knowledge", "technical_score"),
+        ("Communication", "communication_score"),
+        ("Problem Solving", "problem_solving_score"),
+        ("Answer Structure", "answer_structure_score"),
+    ]
+
+    recent = interviews[-3:]
+    previous = interviews[-6:-3] if len(interviews) > 3 else []
+    result = []
+
+    for name, field in fields:
+        recent_avg = _average_for(recent, field)
+        previous_avg = (
+            _average_for(previous, field) if previous else None
+        )
+        result.append({
+            "name": name,
+            "recent": recent_avg,
+            "change": _change(recent_avg, previous_avg),
+        })
+
+    return result
+
+
+def _render_trend_badge(change):
+    st.markdown(
+        f"""
+        <div class="trend-badge {_trend_class(change)}">
+            {_trend_symbol(change)} {abs(change):.1f} pts
+            <span>{_direction(change)}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_score_bar(label, score):
     score = max(0.0, min(100.0, _safe_float(score)))
     state = _score_class(score)
@@ -506,6 +590,75 @@ def progress_page():
             padding: 32px 20px;
             color: #747A91;
         }
+
+        .trend-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        .trend-positive { color: #3F836A; }
+        .trend-negative { color: #B05E73; }
+        .trend-neutral { color: #7D8397; }
+
+        .analytics-row {
+            padding: 13px 0;
+            border-bottom: 1px solid #EEEFF5;
+        }
+
+        .analytics-row:last-child {
+            border-bottom: none;
+        }
+
+        .analytics-main,
+        .analytics-sub {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .analytics-name {
+            color: #454B66;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .analytics-score {
+            color: #5F54C7;
+            font-size: 15px;
+            font-weight: 800;
+        }
+
+        .analytics-sub {
+            margin-top: 5px;
+            color: #9196A8;
+            font-size: 11px;
+        }
+
+        .analytics-insight {
+            background: linear-gradient(135deg, #F6F3FF, #FFFFFF);
+            border: 1px solid #DDD8F4;
+            border-radius: 18px;
+            padding: 20px;
+        }
+
+        .analytics-insight-title {
+            color: #30354D;
+            font-size: 16px;
+            font-weight: 800;
+            margin-bottom: 7px;
+        }
+
+        .analytics-insight-body {
+            color: #70768C;
+            font-size: 13px;
+            line-height: 1.65;
+        }
+
         </style>
         """,
         unsafe_allow_html=True,
@@ -711,76 +864,187 @@ def progress_page():
     st.write("")
 
     # --------------------------------------------------------
-    # STRONGEST / FOCUS AREAS
     # --------------------------------------------------------
-    st.subheader("💡 What to Focus On")
+    # INTELLIGENT ANALYTICS
+    # --------------------------------------------------------
+    st.subheader("🧠 Intelligent Performance Analytics")
 
-    skill_scores = [
-        ("Technical Knowledge", technical),
-        ("Communication", communication),
-        ("Problem Solving", problem_solving),
-        ("Answer Structure", answer_structure),
-    ]
+    chronological = list(reversed(completed))
+    recent = chronological[-3:]
+    previous = chronological[-6:-3] if len(chronological) > 3 else []
 
-    evaluated_skills = [
-        item for item in skill_scores
-        if item[1] > 0
-    ]
+    recent_average = _average_for(recent, "overall_score")
+    previous_average = (
+        _average_for(previous, "overall_score")
+        if previous else None
+    )
+    overall_change = _change(recent_average, previous_average)
 
-    if evaluated_skills:
-        strongest_name, strongest_score = max(
-            evaluated_skills,
-            key=lambda item: item[1]
-        )
-        focus_name, focus_score = min(
-            evaluated_skills,
-            key=lambda item: item[1]
-        )
+    best_score = 0.0
+    best_number = None
+    for number, interview in enumerate(chronological, start=1):
+        score = interview.get("overall_score")
+        if _valid_score(score) and float(score) > best_score:
+            best_score = float(score)
+            best_number = number
 
-        c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
 
-        with c1:
-            with st.container(border=True):
-                st.subheader("💪 Strongest Area")
-                st.metric(
-                    strongest_name,
-                    f"{strongest_score:.1f}%"
-                )
-                st.caption(
-                    "Keep this as a strength while improving "
-                    "the areas below it."
-                )
-
-        with c2:
-            with st.container(border=True):
-                st.subheader("⚠️ Priority Area")
-                st.metric(
-                    focus_name,
-                    f"{focus_score:.1f}%"
-                )
-                st.caption(
-                    "Use focused practice and your next mock "
-                    "interview to improve this score."
-                )
-    else:
+    with c1:
         with st.container(border=True):
+            st.caption("RECENT PERFORMANCE")
+            st.metric("Last 3 Interviews", f"{recent_average:.1f}%")
+            _render_trend_badge(overall_change)
+
+    with c2:
+        with st.container(border=True):
+            st.caption("BEST INTERVIEW")
+            st.metric(
+                f"Interview #{best_number}" if best_number else "Best Score",
+                f"{best_score:.1f}%" if best_number else "—",
+            )
+
+    with c3:
+        with st.container(border=True):
+            st.caption("CURRENT DIRECTION")
+            st.metric("Performance", _direction(overall_change))
             st.caption(
-                "Complete an interview to identify your strongest "
-                "and highest-priority areas."
+                "Compared with the previous interview group."
+                if previous else
+                "Complete more interviews for a comparison."
             )
 
     st.write("")
 
-    # --------------------------------------------------------
-    # MIRAI INSIGHT
-    # --------------------------------------------------------
-    st.subheader("🤖 Mirai Insight")
+    skills = _skill_analytics(chronological)
 
-    _render_insight(
-        average_score,
-        readiness,
-        weak_topics,
-        interviews_completed,
+    left, right = st.columns([1.1, 0.9], gap="large")
+
+    with left:
+        st.subheader("📊 Skill Movement")
+        with st.container(border=True):
+            if len(chronological) < 2:
+                st.info(
+                    "Complete one more interview to compare how each "
+                    "skill is changing."
+                )
+            else:
+                for skill in skills:
+                    change = skill["change"]
+                    st.markdown(
+                        f"""
+                        <div class="analytics-row">
+                            <div class="analytics-main">
+                                <span class="analytics-name">
+                                    {skill["name"]}
+                                </span>
+                                <span class="analytics-score">
+                                    {skill["recent"]:.1f}%
+                                </span>
+                            </div>
+                            <div class="analytics-sub">
+                                <span>Recent 3 interviews</span>
+                                <span class="{_trend_class(change)}">
+                                    {_trend_symbol(change)}
+                                    {abs(change):.1f} pts
+                                </span>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+    with right:
+        st.subheader("🎯 Performance Signal")
+        with st.container(border=True):
+            evaluated = [s for s in skills if s["recent"] > 0]
+
+            if evaluated:
+                strongest = max(evaluated, key=lambda s: s["recent"])
+                priority = min(evaluated, key=lambda s: s["recent"])
+
+                st.markdown(
+                    f"""
+                    <div class="analytics-insight">
+                        <div class="analytics-insight-title">
+                            💪 Strongest: {strongest["name"]}
+                        </div>
+                        <div class="analytics-insight-body">
+                            Recent average:
+                            <strong>{strongest["recent"]:.1f}%</strong>
+                            <br><br>
+                            <strong>⚠️ Priority:</strong>
+                            {priority["name"]}
+                            ({priority["recent"]:.1f}%)
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("Skill signals will appear after scored interviews.")
+
+    st.write("")
+
+    st.subheader("🤖 Mirai Recommendation")
+
+    evaluated = [s for s in skills if s["recent"] > 0]
+    declining = [s for s in evaluated if s["change"] < -2]
+    improving = [s for s in evaluated if s["change"] > 2]
+
+    if not chronological:
+        title = "Your journey starts here"
+        body = (
+            "Complete your first interview so Mirai can learn from "
+            "your actual performance."
+        )
+    elif len(chronological) < 2:
+        title = "Build your performance baseline"
+        body = (
+            "Complete another interview so Mirai can compare your "
+            "scores and identify your improvement pattern."
+        )
+    elif declining:
+        names = ", ".join(s["name"] for s in declining[:2])
+        title = f"Watch your {names} performance"
+        body = (
+            f"Your recent results show a downward movement in {names}. "
+            "Focus your next practice session on structured answers "
+            "and deliberate practice in these areas."
+        )
+    elif evaluated:
+        weakest = min(evaluated, key=lambda s: s["recent"])
+        title = f"Focus next on {weakest['name']}"
+        body = (
+            f"{weakest['name']} is currently your lowest-scoring skill "
+            f"at {weakest['recent']:.1f}% across your recent interviews. "
+            "Improving this area should give you the best opportunity "
+            "to raise your overall performance."
+        )
+        if improving:
+            body += " Your improving skills show that your practice is working."
+    elif overall_change > 2:
+        title = "You're moving in the right direction"
+        body = (
+            f"Your recent average is up {overall_change:.1f} points. "
+            "Keep the same practice consistency and maintain that improvement."
+        )
+    else:
+        title = "Your next goal is consistency"
+        body = (
+            "Your recent performance is relatively stable. Pick one "
+            "skill to improve in the next interview instead of trying "
+            "to change everything at once."
+        )
+
+    st.markdown(
+        f"""
+        <div class="analytics-insight">
+            <div class="analytics-insight-title">{title}</div>
+            <div class="analytics-insight-body">{body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     st.write("")

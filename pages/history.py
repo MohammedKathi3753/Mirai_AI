@@ -1,7 +1,44 @@
 import streamlit as st
 from datetime import datetime
 
-from database.database import get_interview_history
+from database.database import (
+    get_interview_history,
+    get_interview_answers,
+)
+
+# ============================================================
+# HELPERS
+# ============================================================
+
+def format_date(value):
+    if not value:
+        return "Date unavailable"
+
+    try:
+        parsed = datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        )
+        return parsed.strftime("%d %b %Y, %I:%M %p")
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def format_score(value):
+    if value is None:
+        return "—"
+
+    try:
+        return f"{float(value):.1f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _safe_text(value, fallback="Not available"):
+    if value is None:
+        return fallback
+
+    value = str(value).strip()
+    return value if value else fallback
 
 
 # ============================================================
@@ -19,7 +56,11 @@ def history_page():
             "Please sign in to your Mirai AI account to view your interview history."
         )
 
-        if st.button("← Go to Mirai AI", type="primary", use_container_width=True):
+        if st.button(
+            "← Go to Mirai AI",
+            type="primary",
+            use_container_width=True
+        ):
             st.session_state.page = "welcome"
             st.switch_page("app.py")
         return
@@ -39,8 +80,11 @@ def history_page():
         if interview.get("status") == "completed"
     ]
 
+    # --------------------------------------------------------
+    # PAGE HEADER
+    # --------------------------------------------------------
     st.title("📜 Interview History")
-    st.write("Review your previous interview sessions.")
+    st.write("Review your previous interview sessions and detailed feedback.")
     st.write("")
 
     # --------------------------------------------------------
@@ -67,28 +111,48 @@ def history_page():
         return
 
     # --------------------------------------------------------
-    # DATE FORMATTER
+    # HISTORY SUMMARY
     # --------------------------------------------------------
-    def format_date(value):
-        if not value:
-            return "Date unavailable"
+    total_interviews = len(completed_interviews)
 
-        try:
-            parsed = datetime.fromisoformat(
-                str(value).replace("Z", "+00:00")
-            )
-            return parsed.strftime("%d %b %Y, %I:%M %p")
-        except (TypeError, ValueError):
-            return str(value)
+    valid_scores = [
+        float(item["overall_score"])
+        for item in completed_interviews
+        if item.get("overall_score") is not None
+    ]
+
+    average_score = (
+        sum(valid_scores) / len(valid_scores)
+        if valid_scores else 0
+    )
+
+    best_score = max(valid_scores) if valid_scores else 0
+
+    summary_col1, summary_col2, summary_col3 = st.columns(3)
+
+    with summary_col1:
+        st.metric("Completed Interviews", total_interviews)
+
+    with summary_col2:
+        st.metric("Average Score", f"{average_score:.1f}%")
+
+    with summary_col3:
+        st.metric("Best Score", f"{best_score:.1f}%")
+
+    st.write("")
+    st.subheader("Previous Interviews")
 
     # --------------------------------------------------------
     # DISPLAY COMPLETED INTERVIEWS
     # --------------------------------------------------------
-    for interview in completed_interviews:
+    for index, interview in enumerate(completed_interviews, start=1):
+
+        interview_id = interview.get("id")
 
         role = interview.get("target_job_role", "Unknown Role")
         interview_type = interview.get("interview_type", "Unknown Type")
         difficulty = interview.get("difficulty", "Unknown")
+        focus_area = interview.get("focus_area", "General")
 
         overall_score = interview.get("overall_score")
         readiness_score = interview.get("readiness_score")
@@ -101,9 +165,12 @@ def history_page():
             or interview.get("created_at")
         )
 
+        # ----------------------------------------------------
+        # INTERVIEW SUMMARY CARD
+        # ----------------------------------------------------
         with st.container(border=True):
 
-            st.subheader(f"🎯 {role}")
+            st.subheader(f"🎯 Interview #{total_interviews - index + 1} · {role}")
             st.caption(format_date(completed_at))
 
             col1, col2, col3 = st.columns(3)
@@ -111,62 +178,245 @@ def history_page():
             with col1:
                 st.metric(
                     "Overall Score",
-                    f"{float(overall_score):.1f}%"
-                    if overall_score is not None else "—"
+                    format_score(overall_score)
                 )
 
             with col2:
                 st.metric(
                     "Readiness",
-                    f"{float(readiness_score):.1f}%"
-                    if readiness_score is not None else "—"
+                    format_score(readiness_score)
                 )
 
             with col3:
                 st.metric(
                     "Questions",
                     f"{completed_questions}/{total_questions}"
-                    if total_questions else str(completed_questions)
+                    if total_questions
+                    else str(completed_questions)
                 )
 
             st.write("")
             st.write(f"**Interview Type:** {interview_type}")
             st.write(f"**Difficulty:** {difficulty}")
+            st.write(f"**Focus Area:** {focus_area}")
+
             st.write("")
 
             score_col1, score_col2, score_col3, score_col4 = st.columns(4)
 
-            with score_col1:
-                value = interview.get("technical_score")
-                st.caption("Technical")
-                st.write(
-                    f"{float(value):.1f}%"
-                    if value is not None else "—"
-                )
+            score_items = [
+                ("Technical", "technical_score"),
+                ("Communication", "communication_score"),
+                ("Problem Solving", "problem_solving_score"),
+                ("Structure", "answer_structure_score"),
+            ]
 
-            with score_col2:
-                value = interview.get("communication_score")
-                st.caption("Communication")
-                st.write(
-                    f"{float(value):.1f}%"
-                    if value is not None else "—"
-                )
+            for column, (label, field) in zip(
+                [score_col1, score_col2, score_col3, score_col4],
+                score_items
+            ):
+                with column:
+                    st.caption(label)
+                    st.write(format_score(interview.get(field)))
 
-            with score_col3:
-                value = interview.get("problem_solving_score")
-                st.caption("Problem Solving")
-                st.write(
-                    f"{float(value):.1f}%"
-                    if value is not None else "—"
-                )
+            st.write("")
 
-            with score_col4:
-                value = interview.get("answer_structure_score")
-                st.caption("Structure")
-                st.write(
-                    f"{float(value):.1f}%"
-                    if value is not None else "—"
-                )
+            # ------------------------------------------------
+            # LOAD DETAILED ANSWERS ONLY WHEN REQUESTED
+            # ------------------------------------------------
+            # Keep the widget key separate from the session-state key.
+            # Streamlit does not allow a widget's own session-state key
+            # to be modified after that widget has been instantiated.
+            details_widget_key = f"history_details_btn_{interview_id}"
+            details_state_key = f"history_details_open_{interview_id}"
+
+            if details_state_key not in st.session_state:
+                st.session_state[details_state_key] = False
+
+            if st.button(
+                "📖 View Interview Details",
+                key=details_widget_key,
+                use_container_width=True
+            ):
+                st.session_state[details_state_key] = not st.session_state[
+                    details_state_key
+                ]
+
+            if st.session_state.get(details_state_key, False):
+
+                st.divider()
+                st.subheader("📝 Questions, Answers & Feedback")
+
+                try:
+                    answer_rows = get_interview_answers(interview_id)
+                except Exception as error:
+                    st.error(
+                        f"Could not load interview details: {error}"
+                    )
+                    answer_rows = []
+
+                if not answer_rows:
+                    st.info(
+                        "No question-level answer records were found "
+                        "for this interview."
+                    )
+                else:
+
+                    for question_index, answer in enumerate(
+                        answer_rows,
+                        start=1
+                    ):
+
+                        question_text = _safe_text(
+                            answer.get("question_text"),
+                            "Question unavailable"
+                        )
+
+                        topic = _safe_text(
+                            answer.get("topic"),
+                            "General"
+                        )
+
+                        # The current database query may not expose topic
+                        # directly through get_interview_answers, so keep
+                        # the UI safe when it is unavailable.
+                        if topic == "General" and answer.get("question_topic"):
+                            topic = _safe_text(
+                                answer.get("question_topic"),
+                                "General"
+                            )
+
+                        with st.container(border=True):
+
+                            st.markdown(
+                                f"### Question {question_index}"
+                            )
+
+                            st.caption(f"🎯 Topic: {topic}")
+
+                            st.markdown(
+                                f"**Question**\n\n{question_text}"
+                            )
+
+                            st.markdown("**Your Answer**")
+                            st.write(
+                                _safe_text(
+                                    answer.get("user_answer"),
+                                    "No answer recorded."
+                                )
+                            )
+
+                            eval_col1, eval_col2, eval_col3 = st.columns(3)
+
+                            with eval_col1:
+                                st.metric(
+                                    "Answer Score",
+                                    format_score(
+                                        answer.get("overall_score")
+                                    )
+                                )
+
+                            with eval_col2:
+                                st.metric(
+                                    "Technical",
+                                    format_score(
+                                        answer.get("technical_score")
+                                    )
+                                )
+
+                            with eval_col3:
+                                st.metric(
+                                    "Communication",
+                                    format_score(
+                                        answer.get("communication_score")
+                                    )
+                                )
+
+                            st.write("")
+
+                            feedback_col1, feedback_col2 = st.columns(2)
+
+                            with feedback_col1:
+                                st.markdown("**💪 Strengths**")
+                                st.write(
+                                    _safe_text(
+                                        answer.get("strengths"),
+                                        "No strengths recorded."
+                                    )
+                                )
+
+                                st.markdown("**⚠️ Areas to Improve**")
+                                st.write(
+                                    _safe_text(
+                                        answer.get("weaknesses"),
+                                        "No weaknesses recorded."
+                                    )
+                                )
+
+                            with feedback_col2:
+                                st.markdown("**🤖 Mirai Feedback**")
+                                st.write(
+                                    _safe_text(
+                                        answer.get("feedback"),
+                                        "No feedback recorded."
+                                    )
+                                )
+
+                                st.markdown("**🎯 Recommended Action**")
+                                st.write(
+                                    _safe_text(
+                                        answer.get("recommended_action"),
+                                        "No recommended action recorded."
+                                    )
+                                )
+
+                            st.write("")
+
+                # --------------------------------------------
+                # FINAL INTERVIEW SUMMARY
+                # --------------------------------------------
+                st.divider()
+                st.subheader("📊 Final Interview Summary")
+
+                final_col1, final_col2, final_col3 = st.columns(3)
+
+                with final_col1:
+                    st.metric(
+                        "Overall",
+                        format_score(interview.get("overall_score"))
+                    )
+                    st.metric(
+                        "Technical",
+                        format_score(interview.get("technical_score"))
+                    )
+
+                with final_col2:
+                    st.metric(
+                        "Communication",
+                        format_score(
+                            interview.get("communication_score")
+                        )
+                    )
+                    st.metric(
+                        "Problem Solving",
+                        format_score(
+                            interview.get("problem_solving_score")
+                        )
+                    )
+
+                with final_col3:
+                    st.metric(
+                        "Answer Structure",
+                        format_score(
+                            interview.get("answer_structure_score")
+                        )
+                    )
+                    st.metric(
+                        "Readiness",
+                        format_score(
+                            interview.get("readiness_score")
+                        )
+                    )
 
         st.write("")
 

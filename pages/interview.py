@@ -7,6 +7,8 @@ from database.database import (
     save_answer,
     save_evaluation,
     complete_interview,
+    update_topic_performance,
+    get_weak_topics,
 )
 
 # IMPORTANT:
@@ -524,6 +526,51 @@ def generate_unique_question(
 
 
     return None
+
+
+# ============================================================
+# HELPER: TOPIC WEAKNESS CONTEXT
+# ============================================================
+
+def build_topic_weakness_context(user_id):
+    """
+    Return a compact summary of the candidate's weakest tracked topics.
+    """
+
+    try:
+        weak_topics = get_weak_topics(
+            user_id,
+            limit=3,
+        )
+    except Exception:
+        return ""
+
+    if not weak_topics:
+        return ""
+
+    parts = []
+
+    for item in weak_topics:
+        topic = str(
+            item.get("topic", "General")
+        ).strip()
+
+        try:
+            score = float(
+                item.get("average_score", 0)
+            )
+        except (
+            TypeError,
+            ValueError,
+        ):
+            score = 0.0
+
+        if topic:
+            parts.append(
+                f"{topic} ({score:.1f}% average)"
+            )
+
+    return "; ".join(parts)
 
 
 # ============================================================
@@ -1303,15 +1350,20 @@ if (
                 # target the next question at the weakness found
                 # in the previous AI evaluation.
                 weakness_context=(
-                    st.session_state.last_evaluation.get(
-                        "weaknesses",
-                        "",
+                    build_topic_weakness_context(
+                        user["id"]
                     )
-                    if isinstance(
-                        st.session_state.last_evaluation,
-                        dict,
+                    or (
+                        st.session_state.last_evaluation.get(
+                            "weaknesses",
+                            "",
+                        )
+                        if isinstance(
+                            st.session_state.last_evaluation,
+                            dict,
+                        )
+                        else ""
                     )
-                    else ""
                 ),
             )
         )
@@ -1772,6 +1824,32 @@ elif (
             st.stop()
 
 
+            st.stop()
+
+
+        # ----------------------------------------------------
+        # UPDATE TOPIC PERFORMANCE
+        # ----------------------------------------------------
+        # The question already contains its normalized topic. Record
+        # the answer's overall score against that topic.
+        try:
+            update_topic_performance(
+                user["id"],
+                question.get(
+                    "topic",
+                    "General"
+                ),
+                evaluation[
+                    "overall_score"
+                ],
+            )
+        except Exception as error:
+            # Topic analytics must never break the interview itself.
+            st.warning(
+                f"Topic performance could not be updated: {error}"
+            )
+
+
         # ----------------------------------------------------
         # Store evaluation
         # ----------------------------------------------------
@@ -1975,6 +2053,27 @@ elif (
                 ),
 
                 profile_context=candidate_profile,
+                weakness_context=(
+                    build_topic_weakness_context(
+                        user["id"]
+                    )
+                    + (
+                        " | "
+                        + st.session_state.last_evaluation.get(
+                            "weaknesses",
+                            "",
+                        )
+                        if isinstance(
+                            st.session_state.last_evaluation,
+                            dict,
+                        )
+                        and st.session_state.last_evaluation.get(
+                            "weaknesses",
+                            "",
+                        )
+                        else ""
+                    )
+                ),
             )
         )
 

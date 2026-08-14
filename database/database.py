@@ -1663,3 +1663,44 @@ def get_weak_topics(
     finally:
 
         connection.close()
+
+# ============================================================
+# GET TOPIC PERFORMANCE
+# ============================================================
+
+def get_topic_performance(
+    user_id
+):
+    """
+    Return all tracked topic performance for a candidate.
+    """
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                topic,
+                attempts,
+                average_score,
+                last_score,
+                improvement_rate,
+                last_practiced_at
+            FROM topic_performance
+            WHERE user_id = ?
+            ORDER BY average_score ASC, attempts DESC
+            """,
+            (user_id,)
+        )
+
+        topics = cursor.fetchall()
+
+        return [
+            dict(topic)
+            for topic in topics
+        ]
+
+    finally:
+        connection.close()
